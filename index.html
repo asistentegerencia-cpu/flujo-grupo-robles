@@ -263,7 +263,8 @@ var NUCLEO=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'
 var SEG=['BANCO','DVO','OTROS'];
 var RECOM={'DEUDA GG':50,'OPE Planta':7,'OPE Infra':20,'OPE Comex':3,'VENTAS':5,'MKT':5,'ADM':10};
 var AREAS=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM','BANCO','DVO','OTROS','INGRESO','REVISAR'];
-var AREA_LABEL={'BANCO':'Banco (ITF)','DVO':'Diferencia de cambio','OTROS':'Otros'};
+// 'DEUDA GG' es la clave guardada en la BD; en pantalla se muestra con su nombre nuevo
+var AREA_LABEL={'DEUDA GG':'CAPITALIZACIÓN DIRECCIÓN','BANCO':'Banco (ITF)','DVO':'Diferencia de cambio','OTROS':'Otros'};
 function areaLabel(a){return AREA_LABEL[a]||a;}
 var AREA_COLOR={'DEUDA GG':'#f87171','OPE Planta':'#34d399','OPE Infra':'#22d3ee','OPE Comex':'#a78bfa','VENTAS':'#fbbf24','MKT':'#f472b6','ADM':'#60a5fa','BANCO':'#94a3b8','DVO':'#c084fc','OTROS':'#64748b','INGRESO':'#22c55e','REVISAR':'#f87171'};
 // Clasificación de ingresos, INDEPENDIENTE del Área (que solo clasifica egresos del núcleo/seguimiento)
@@ -275,7 +276,7 @@ var PROYECTOS=['Palta','Pitahaya'];
 var REGLAS=[['ITF','BANCO'],['N/D I-BANC','BANCO'],['N/D MEGA','BANCO'],['N/D AUTORIZADA','BANCO'],['COMISION','BANCO'],['MANTENIMIENTO','BANCO'],['PORTES','BANCO'],['I-BANC + COM','BANCO'],['BAYAS Y FRUTOS','OPE Planta'],['PAJUELO ESPINO','OPE Planta'],['ENTEL','ADM'],['PAGO DE SERVICIOS','ADM'],['GRUPO INMOBILIARIO ROBLES','DEUDA GG'],['ROBLES NU','DEUDA GG'],['IZIPAY','INGRESO'],['DEP.EFECTIVO','INGRESO'],['EVOLUTION EMBOLSOS','INGRESO']];
 // Tipo de cambio del mes: el guardado en la nube manda; si no hay, el valor por defecto de TC
 function getTC(ymStr){var s=DB.saldos[ymStr];if(s&&s.tc)return s.tc;return TC[+ymStr.slice(5,7)]||3.47;}
-// Costos fijos: se reparten en partes iguales entre las áreas principales (sin DEUDA GG)
+// Costos fijos: se reparten en partes iguales entre las áreas principales (sin CAPITALIZACIÓN DIRECCIÓN = 'DEUDA GG')
 var AREAS_REPARTO=NUCLEO.filter(function(a){return a!=='DEUDA GG';});
 function areasReparto(m){
   if(!m.esFijo)return [m.area];
@@ -566,7 +567,7 @@ function renderMes(){
   '</div>';
   var dn=distNucleo(movs);
   var distRows=dn.rows.map(function(d){var st=d.status==='ok'?'<span class="status st-ok">OK</span>':d.status==='ex'?'<span class="status st-ex">Excedido</span>':'<span class="status st-na">—</span>';
-    return '<tr><td><b>'+d.area+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num" style="color:var(--muted)">'+(d.fijo?S(d.fijo):'—')+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.recom.toFixed(1)+'%</td><td>'+st+'</td></tr>';}).join('');
+    return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num" style="color:var(--muted)">'+(d.fijo?S(d.fijo):'—')+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.recom.toFixed(1)+'%</td><td>'+st+'</td></tr>';}).join('');
   var distCard='<div class="card"><h3>Distribución por área <span class="m">· núcleo (100%) · los costos fijos se reparten en partes iguales entre las áreas elegidas</span></h3><div class="tablescroll"><table><thead><tr><th>Área</th><th class="num">Gastado</th><th class="num">De costos fijos</th><th class="num">% Egreso</th><th class="num">% Recomendado</th><th>Status</th></tr></thead><tbody>'+distRows+'<tr style="font-weight:700"><td>TOTAL NÚCLEO</td><td class="num">'+S(dn.tot)+'</td><td class="num">'+(dn.totFijo?S(dn.totFijo):'—')+'</td><td class="num">100%</td><td class="num">100%</td><td></td></tr></tbody></table></div></div>';
   var ds=distSeg(movs);var segTot=ds.reduce(function(s,d){return s+d.gastado;},0);var segOps=ds.reduce(function(s,d){return s+d.ops;},0);
   var segRows=ds.map(function(d){return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.ops+'</td></tr>';}).join('');
@@ -1232,13 +1233,13 @@ function renderConsolGeneral(){
   var pBody=alist.map(function(a){return '<tr><td><b>'+areaLabel(a)+'</b></td>'+present.map(function(mn){var v=(byAM[a][mn]||0);return cel(v,monTot[mn]?v/monTot[mn]*100:0);}).join('')+cel(areaTot[a],areaTot[a]/grand*100)+'</tr>';}).join('');
   var pFoot='<tr style="font-weight:700"><td>TOTAL EGRESO</td>'+present.map(function(mn){return '<td class="num">'+S(monTot[mn])+'</td>';}).join('')+'<td class="num">'+S(grand)+'</td></tr>';
   var pivotCard=alist.length?('<div class="card"><h3>Consolidado por área y mes <span class="m">· monto y % del egreso de cada mes · '+NOTA_USD+'</span></h3><div style="overflow-x:auto"><table><thead>'+pTh+'</thead><tbody>'+pBody+pFoot+'</tbody></table></div></div>'):'';
-  var areaChecks=NUCLEO.map(function(a){var checked=AREAS_TREND_SEL.indexOf(a)!==-1;return '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:0 12px 6px 0"><input type="checkbox" class="trendAreaChk" value="'+a+'"'+(checked?' checked':'')+'> '+a+'</label>';}).join('');
+  var areaChecks=NUCLEO.map(function(a){var checked=AREAS_TREND_SEL.indexOf(a)!==-1;return '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:0 12px 6px 0"><input type="checkbox" class="trendAreaChk" value="'+a+'"'+(checked?' checked':'')+'> '+areaLabel(a)+'</label>';}).join('');
   var filtroCard='<div class="card"><h3>Filtrar áreas <span class="m">· para la tendencia y el resumen de abajo · el rango de fechas/mes se filtra arriba</span></h3><div>'+areaChecks+'</div></div>';
   var byMonthDist={};present.forEach(function(mn){var ymStr=q.anio+'-'+('0'+mn).slice(-2);var movsMes=movsDe(ymStr).filter(function(m){return (!q.d1||m.fecha>=q.d1)&&(!q.d2||m.fecha<=q.d2);});byMonthDist[mn]=distNucleo(movsMes);});
   var trendCard='<div class="card"><h3>Tendencia por área <span class="m">· % real vs recomendado, mes a mes</span></h3>'+trendChart(AREAS_TREND_SEL,present,byMonthDist)+'</div>';
   var dnPeriodo=distNucleo(movs);
   var resumenRows=dnPeriodo.rows.filter(function(d){return AREAS_TREND_SEL.indexOf(d.area)!==-1;}).map(function(d){var st=d.status==='ok'?'<span class="status st-ok">OK</span>':d.status==='ex'?'<span class="status st-ex">Excedido</span>':'<span class="status st-na">—</span>';
-    return '<tr><td><b>'+d.area+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.recom.toFixed(1)+'%</td><td>'+st+'</td></tr>';}).join('');
+    return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.recom.toFixed(1)+'%</td><td>'+st+'</td></tr>';}).join('');
   var resumenCard='<div class="card"><h3>Resumen del período <span class="m">· % acumulado vs recomendado</span></h3><table><thead><tr><th>Área</th><th class="num">Gastado</th><th class="num">% del período</th><th class="num">% Recomendado</th><th>Status</th></tr></thead><tbody>'+(resumenRows||'<tr><td colspan="5"><div class="empty">Marca al menos un área arriba.</div></td></tr>')+'</tbody></table></div>';
   box.innerHTML=kpis+chart+rankCard+filtroCard+trendCard+resumenCard+pivotCard;
   Array.prototype.forEach.call(box.querySelectorAll('.trendAreaChk'),function(c){c.onchange=function(){
@@ -1261,7 +1262,7 @@ function exportar(scope){
   A.push(['Resultado (queda)',r2(HT.ingS-HT.egrS),pctQueda(HT.ingS,HT.egrS).toFixed(1)+'%']);
   if(mesMovs){var sal=DB.saldos[document.getElementById('selMes').value]||{};A.push(['Saldo final (banco)',sal.soles!=null?r2(sal.soles):'',sal.dolares!=null?('$ '+r2(sal.dolares)):'']);}
   A.push([]);A.push(['DISTRIBUCIÓN POR ÁREA (NÚCLEO 100%)']);A.push(['Área','Gastado S/','% Egreso','% Recomendado','Status']);
-  var dn=distNucleo(head);dn.rows.forEach(function(d){A.push([d.area,r2(d.gastado),d.pct.toFixed(1)+'%',d.recom+'%',statusTxt(d.status)]);});
+  var dn=distNucleo(head);dn.rows.forEach(function(d){A.push([areaLabel(d.area),r2(d.gastado),d.pct.toFixed(1)+'%',d.recom+'%',statusTxt(d.status)]);});
   A.push(['TOTAL NÚCLEO',r2(dn.tot),'100%','100%','']);A.push([]);A.push(['SEGUIMIENTO (FUERA DEL 100%)']);A.push(['Área','Gastado S/','% s/ Egreso','# Ops']);
   distSeg(head).forEach(function(d){A.push([areaLabel(d.area),r2(d.gastado),d.pct.toFixed(1)+'%',d.ops]);});
   A.push([]);A.push([]);A.push(['CONSOLIDADO '+anio+' (resumen)']);A.push(['Mes','Ingresos S/','Egresos S/','Resultado S/','% que queda']);
