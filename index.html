@@ -593,19 +593,46 @@ var PROYECTOS=['Palta','Pitahaya'];
 var REGLAS=[['ITF','BANCO'],['N/D I-BANC','BANCO'],['N/D MEGA','BANCO'],['N/D AUTORIZADA','BANCO'],['COMISION','BANCO'],['MANTENIMIENTO','BANCO'],['PORTES','BANCO'],['I-BANC + COM','BANCO'],['BAYAS Y FRUTOS','OPE Planta'],['PAJUELO ESPINO','OPE Planta'],['ENTEL','ADM'],['PAGO DE SERVICIOS','ADM'],['GRUPO INMOBILIARIO ROBLES','DEUDA GG'],['ROBLES NU','DEUDA GG'],['IZIPAY','INGRESO'],['DEP.EFECTIVO','INGRESO'],['EVOLUTION EMBOLSOS','INGRESO']];
 // Tipo de cambio del mes: el guardado en la nube manda; si no hay, el valor por defecto de TC
 function getTC(ymStr){var s=DB.saldos[ymStr];if(s&&s.tc)return s.tc;return TC[+ymStr.slice(5,7)]||3.47;}
-// Costos fijos: se reparten en partes iguales entre las áreas principales (sin CAPITALIZACIÓN DIRECCIÓN = 'DEUDA GG')
-// y Evolution, que es una entidad aparte pero usa la oficina (su parte queda fuera del núcleo 100%)
-var AREAS_REPARTO=NUCLEO.filter(function(a){return a!=='DEUDA GG';}).concat(['EVOLUTION']);
-function areasReparto(m){
-  if(!m.esFijo)return [m.area];
-  var l=(m.reparto||'').split(',').filter(function(a){return AREAS_REPARTO.indexOf(a)!==-1;});
-  return l.length?l:AREAS_REPARTO.slice();
+// ============ Costos fijos: cuadro de colaboradores ============
+// Los costos fijos se reparten según el cuadro de colaboradores por área (pestaña Costos fijos).
+// Cada área del cuadro dice en qué áreas de la distribución se suma su parte (Ventas y Mkt → VENTAS y MKT, mitad y mitad).
+// El cuadro se guarda por mes y rige desde ese mes hasta que se guarde otro.
+var GRUPOS_DEF=[{k:'VYM',l:'Ventas y Mkt',n:14,areas:['VENTAS','MKT']},{k:'COMEX',l:'Comex',n:2,areas:['OPE Comex']},{k:'ADM',l:'ADM',n:6,areas:['ADM']},{k:'EVOLUTION',l:'Evolution',n:3,areas:['EVOLUTION']}];
+var AREAS_DESTINO=NUCLEO.filter(function(a){return a!=='DEUDA GG';}).concat(['EVOLUTION']);
+var HAS_BASES=false;
+// reparto guardado con el esquema anterior (nombres de área) → área del cuadro
+var REPARTO_ANTIGUO={'VENTAS':'VYM','MKT':'VYM','OPE Comex':'COMEX','ADM':'ADM','EVOLUTION':'EVOLUTION'};
+function basesDe(ymStr){
+  var ks=Object.keys(DB.bases||{}).sort(),k=null;
+  ks.forEach(function(x){if(x<=ymStr)k=x;});
+  if(!k&&ks.length)k=ks[0];
+  return {ym:k,grupos:k?DB.bases[k]:GRUPOS_DEF};
 }
-// Reparte al céntimo: las partes siempre suman exactamente el monto original
-function repartir(m,monto,fn){var l=areasReparto(m);if(l.length===1){fn(l[0],monto);return;}
-  var c=Math.round(monto*100),base=Math.floor(c/l.length),resto=c-base*l.length;
-  l.forEach(function(a,i){fn(a,(base+(i<resto?1:0))/100);});}
-function repartoTxt(m){var l=areasReparto(m);return l.length===AREAS_REPARTO.length?'Todas ('+l.length+')':l.map(function(a){return a==='EVOLUTION'?'Evolution':areaLabel(a);}).join(', ');}
+function gruposDe(ymStr){return basesDe(ymStr).grupos;}
+function gruposReparto(m){
+  var G=gruposDe(ym(m.fecha)),keys=G.map(function(g){return g.k;}),l=[];
+  (m.reparto||'').split(',').forEach(function(t){t=t.trim();var k=keys.indexOf(t)!==-1?t:REPARTO_ANTIGUO[t];if(k&&keys.indexOf(k)!==-1&&l.indexOf(k)===-1)l.push(k);});
+  return l.length?G.filter(function(g){return l.indexOf(g.k)!==-1;}):G.slice();
+}
+// Divide un monto al céntimo según pesos: las partes siempre suman exactamente el monto
+function splitCents(monto,pesos){
+  var c=Math.round(monto*100),tot=pesos.reduce(function(s,w){return s+w;},0)||1;
+  var raw=pesos.map(function(w){return c*w/tot;}),base=raw.map(Math.floor),resto=c-base.reduce(function(s,v){return s+v;},0);
+  raw.map(function(v,i){return {i:i,f:v-base[i]};}).sort(function(a,b){return b.f-a.f||a.i-b.i;}).slice(0,resto).forEach(function(o){base[o.i]++;});
+  return base.map(function(v){return v/100;});
+}
+function repartirGrupos(m,monto,fn){
+  var G=gruposReparto(m),w=G.map(function(g){return Math.max(+g.n||0,0);});
+  if(!w.some(function(x){return x>0;}))w=G.map(function(){return 1;});
+  var p=splitCents(monto,w);G.forEach(function(g,i){fn(g,p[i]);});
+}
+// Reparte un egreso entre áreas de la distribución: normal → su área; costo fijo → según el cuadro
+// (en un costo fijo el área con que se registró, p. ej. ADM, NO recibe el gasto: solo cuenta el cuadro)
+function repartir(m,monto,fn){
+  if(!m.esFijo){fn(m.area,monto);return;}
+  repartirGrupos(m,monto,function(g,v){var ar=(g.areas&&g.areas.length)?g.areas:['OTROS'];var p=splitCents(v,ar.map(function(){return 1;}));ar.forEach(function(a,i){fn(a,p[i]);});});
+}
+function repartoTxt(m){var G=gruposDe(ym(m.fecha)),l=gruposReparto(m);return l.length===G.length?'Todas ('+l.length+')':l.map(function(g){return g.l;}).join(', ');}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function clasificar(mov,desc,abono){var h=(mov+' '+desc).toUpperCase();for(var i=0;i<REGLAS.length;i++)if(h.indexOf(REGLAS[i][0])!==-1)return REGLAS[i][1];return (abono&&abono>0)?'INGRESO':'REVISAR';}
 
@@ -648,6 +675,7 @@ async function cargarNube(){
   var sl=await sb.from('saldos').select('*');
   if(sl.error) throw sl.error;
   DB.saldos={}; (sl.data||[]).forEach(function(r){DB.saldos[r.ym]={soles:r.soles!=null?+r.soles:null,dolares:r.dolares!=null?+r.dolares:null,tc:r.tc!=null?+r.tc:null};});
+  await cargarBases();
   await cargarAsesores();
   await cargarMetas();
   await cargarMetasPersonal();
@@ -778,7 +806,6 @@ function parseFile(rows,moneda){
   }
   return {movs:out,saldo:saldo};
 }
-
 // ============ Datos ============
 function allMovs(){return Object.keys(DB.movs).map(function(k){return DB.movs[k];});}
 function movsDe(ymStr){return allMovs().filter(function(m){return ym(m.fecha)===ymStr;}).sort(function(a,b){return b.fecha<a.fecha?-1:1;});}
@@ -1097,7 +1124,7 @@ function renderMes(){
   var dTot='<tr class="total"><td>TOTAL NÚCLEO</td><td class="num">'+S(dn.tot)+'</td><td class="num usd">'+(dn.totU?U(dn.totU):'—')+'</td><td class="num"><div class="stack">'+(dn.totFijo?'<span>'+S(dn.totFijo)+'</span>':'')+(dn.totFijoU?'<span class="usd">'+U(dn.totFijoU)+'</span>':'')+(dn.totFijo||dn.totFijoU?'':'—')+'</div></td><td>100% <span class="muted3">/ 100%</span></td><td></td></tr>';
   var dMob=dn.rows.map(function(r){return '<div class="barrow"><div class="top"><span class="n">'+areaDot(r.area)+esc(areaLabel(r.area))+'</span>'+pillStatus(r.status)+'</div>'+pctBar(r,maxP)
     +'<div class="muted" style="font-size:12px"><b style="color:var(--gr-text)">'+r.pct.toFixed(1)+'%</b> de '+r.recom.toFixed(1)+'% · '+S(r.gastado)+(r.gastadoU?' · <span class="usd">'+U(r.gastadoU)+'</span>':'')+'</div></div>';}).join('');
-  var distCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución por área</h2><div class="card-sub">Núcleo (100%) · los costos fijos se reparten en partes iguales entre las áreas elegidas · la marca negra es el % recomendado</div></div></div>'
+  var distCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución por área</h2><div class="card-sub">Núcleo (100%) · los costos fijos se reparten según el cuadro de colaboradores (pestaña Costos fijos) · la marca negra es el % recomendado</div></div></div>'
     +'<div class="tablewrap only-d"><table class="table"><thead><tr><th>Área</th><th class="num">Gastado S/</th><th class="num">Gastado $</th><th class="num">De costos fijos</th><th>% egreso vs recomendado</th><th>Status</th></tr></thead><tbody>'+dRows+dTot+'</tbody></table></div>'
     +'<div class="barlist only-m">'+dMob+'</div>'
     +'<p class="nota">Soles y dólares se muestran por separado. Solo para el % se suman los dólares al TC del mes ('+tc.toFixed(3)+').</p></div>';
@@ -1117,6 +1144,7 @@ function movTexto(m){return [dmy(m.fecha),m.mov,m.desc,m.moneda,String(monto(m))
 function clsHtml(m){
   if(esIngreso(m)){var c=m.clas;var col=c==='VENTAS'?'#16a34a':c==='COBRANZA'?'#0ea5e9':c==='FINANCIAMIENTO'?'#a78bfa':'#94a3b8';
     return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+col+'"></span>'+esc(c?clasLabel(c):'Sin clasificar')+'</span>'+(m.asesor?'<span class="s">'+esc(m.asesor)+'</span>':'')+'</div>';}
+  if(m.esFijo)return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:var(--gr-brand)"></span>Costo fijo</span><span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>'+esc(repartoTxt(m))+'</span></span>'+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+'</div>';
   if(m.area==='REVISAR')return '<span class="clspill rev"><span class="dot round" style="background:var(--gr-neg)"></span>REVISAR</span>';
   return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+(AREA_COLOR[m.area]||'#64748b')+'"></span>'+esc(areaLabel(m.area))+'</span>'+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+(m.esFijo?'<span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>Fijo · '+esc(repartoTxt(m))+'</span></span>':'')+'</div>';
 }
@@ -1151,9 +1179,9 @@ function renderDetLista(){
       +'<td class="nowrap muted c-fecha">'+dmy(m.fecha)+'</td><td style="min-width:170px"><div style="font-weight:700">'+esc(m.desc||m.mov)+'</div><div class="sub"><span class="d-fecha">'+dmy(m.fecha)+' · </span>'+esc(m.mov)+'</div></td><td>'+clsHtml(m)+'</td><td class="num">'+montoHtml(m)+'</td><td style="width:24px;color:var(--gr-text-3)">'+ico('caret-right')+'</td></tr>';}).join('');
   var tabla='<div class="tablewrap det-table"><table class="table"><thead><tr>'+(READONLY?'':'<th style="width:36px;padding-right:0"><input type="checkbox" class="chk" id="chkAll"'+(todos?' checked':'')+' aria-label="Seleccionar todos"></th>')+'<th class="c-fecha">Fecha</th><th>Descripción</th><th>Clasificación</th><th class="num">Monto</th><th></th></tr></thead><tbody>'+filas+'</tbody></table></div>';
   var cards='<div class="mcards">'+lista.map(function(m){var sig=sigOf(m),ing=esIngreso(m);
-    var lab=ing?(m.clas?clasLabel(m.clas):'Sin clasificar'):areaLabel(m.area);var col=ing?'#16a34a':(m.area==='REVISAR'?'var(--gr-neg)':(AREA_COLOR[m.area]||'#64748b'));
+    var lab=ing?(m.clas?clasLabel(m.clas):'Sin clasificar'):(m.esFijo?'Costo fijo · '+repartoTxt(m):areaLabel(m.area));var col=ing?'#16a34a':(m.esFijo?'var(--gr-brand)':(m.area==='REVISAR'?'var(--gr-neg)':(AREA_COLOR[m.area]||'#64748b')));
     return '<button class="mcard'+(m.area==='REVISAR'?' rev':'')+'" data-sig="'+encodeURIComponent(sig)+'"><div class="l1"><span class="d">'+esc(m.desc||m.mov)+'</span>'+montoHtml(m)+'</div>'
-      +'<div class="l2"><span>'+dmy(m.fecha)+'</span><span style="display:inline-flex;align-items:center;gap:5px;font-weight:600;color:var(--gr-text)"><span class="dot round" style="background:'+col+'"></span>'+esc(lab)+'</span>'+(m.asesor||m.personal?'<span>'+esc(m.asesor||m.personal)+'</span>':'')+(m.esFijo&&!ing?'<span class="pill brand">Fijo</span>':'')+'</div></button>';}).join('')+'</div>';
+      +'<div class="l2"><span>'+dmy(m.fecha)+'</span><span style="display:inline-flex;align-items:center;gap:5px;font-weight:600;color:var(--gr-text)"><span class="dot round" style="background:'+col+'"></span>'+esc(lab)+'</span>'+(m.asesor||m.personal?'<span>'+esc(m.asesor||m.personal)+'</span>':'')+''+'</div></button>';}).join('')+'</div>';
   h+='<div class="det-wrap'+(SEL?' con-panel':'')+'"><div class="det-list">'+tabla+cards+'</div><div class="panel'+(SEL&&PANEL_MOVIL?' open':'')+'" id="detPanel"'+(SEL?'':' style="display:none"')+'>'+(SEL?panelHtml():'')+'</div></div>';
   inner.innerHTML=h;wireDet(lista);
 }
@@ -1171,7 +1199,7 @@ function panelHtml(){
       h+='<label class="pfield">Clasificación<select id="pClas">'+Object.keys(CLAS_LABEL).map(function(c){return '<option value="'+c+'"'+((m.clas||'')===c?' selected':'')+'>'+esc(c?CLAS_LABEL[c]:'— Sin clasificar —')+'</option>';}).join('')+'</select></label>'
         +'<label class="pfield">Asesor<select id="pAses">'+asesorOpts(m.asesor,ym(m.fecha))+'</select></label>';
     }else{
-      h+='<label class="pfield">Área<select id="pArea">'+AREAS.filter(function(a){return a!=='INGRESO'||m.area==='INGRESO';}).map(function(a){return '<option value="'+a+'"'+(m.area===a?' selected':'')+'>'+esc(areaLabel(a))+'</option>';}).join('')+'</select></label>'
+      h+='<label class="pfield">Área'+(m.esFijo?' <span class="muted3" style="font-weight:500">(no se usa: es costo fijo y va según el cuadro)</span>':'')+'<select id="pArea">'+AREAS.filter(function(a){return a!=='INGRESO'||m.area==='INGRESO';}).map(function(a){return '<option value="'+a+'"'+(m.area===a?' selected':'')+'>'+esc(areaLabel(a))+'</option>';}).join('')+'</select></label>'
         +'<label class="pfield">Personal<select id="pPers">'+personalOpts(m.personal,ym(m.fecha)).replace('>—<','>— Ninguno —<')+'</select></label>'
         +'<div class="fijobox"><label><input type="checkbox" class="chk" id="pFijo"'+(m.esFijo?' checked':'')+'>Es costo fijo</label>'
           +(m.esFijo?'<button class="repbtn" id="pRep" title="Elegir entre qué áreas se reparte">÷ '+esc(repartoTxt(m))+'</button>':'<span class="muted3" style="font-size:11.5px" id="pRepHint"></span>')+'</div>';
@@ -1179,7 +1207,7 @@ function panelHtml(){
     h+='<label class="pfield">Observación<textarea id="pObs" placeholder="—">'+esc(m.obs||'')+'</textarea></label>';
   }else{
     h+='<div class="ro-grid">'+(ing?'<span>Clasificación</span><span>'+esc(m.clas?clasLabel(m.clas):'—')+'</span><span>Asesor</span><span>'+esc(m.asesor||'—')+'</span>'
-      :'<span>Área</span><span>'+esc(areaLabel(m.area))+'</span><span>Personal</span><span>'+esc(m.personal||'—')+'</span><span>Costo fijo</span><span>'+(m.esFijo?'Sí · '+esc(repartoTxt(m)):'No')+'</span>')
+      :'<span>Área</span><span>'+esc(areaLabel(m.area))+'</span><span>Personal</span><span>'+esc(m.personal||'—')+'</span><span>Costo fijo</span><span>'+(m.esFijo?'Sí · según el cuadro: '+esc(repartoTxt(m)):'No')+'</span>')
       +'<span>Observación</span><span>'+esc(m.obs||'—')+'</span></div><div class="muted3" style="font-size:12px;display:flex;align-items:center;gap:6px">'+ico('eye')+'Modo solo lectura</div>';
   }
   h+='</div>';
@@ -1231,26 +1259,28 @@ function abrirReparto(sig){
   var m=DB.movs[sig];if(!m||READONLY)return;
   if(!HAS_REPARTO){alert('Falta agregar la columna reparto en la tabla movimientos (ver SQL de reparto y TC).');return;}
   var old=$('repModal');if(old)old.remove();
-  var sel=areasReparto(m);
+  var G=gruposDe(ym(m.fecha)),sel=gruposReparto(m).map(function(g){return g.k;});
   var w=document.createElement('div');w.id='repModal';w.className='modal-bg';
-  var checks=AREAS_REPARTO.map(function(a){return '<label class="repopt"><input type="checkbox" class="chk repChk" value="'+a+'"'+(sel.indexOf(a)!==-1?' checked':'')+'>'+areaDot(a)+esc(areaLabel(a))+'</label>';}).join('');
+  var checks=G.map(function(g){return '<label class="repopt"><input type="checkbox" class="chk repChk" value="'+esc(g.k)+'"'+(sel.indexOf(g.k)!==-1?' checked':'')+'><span style="flex:1">'+esc(g.l)+' <span class="muted3" style="font-weight:500;font-size:12px">· '+(+g.n||0)+' colab.</span></span><b class="repv" data-k="'+esc(g.k)+'" style="font-size:13px"></b></label>';}).join('');
   w.innerHTML='<div class="modal" role="dialog" aria-modal="true" aria-labelledby="repT"><div><h3 id="repT">Reparto del costo fijo</h3><div class="muted" style="font-size:13px;margin-top:4px">'+dmy(m.fecha)+' · '+esc(m.desc||m.mov)+' · <b style="color:var(--gr-text)">'+fmtMon(m)+'</b></div></div>'
-    +'<div class="muted" style="font-size:12.5px">Se divide en partes iguales entre las áreas marcadas</div><div>'+checks+'</div>'
+    +'<div class="muted" style="font-size:12.5px">Se reparte según el número de colaboradores de cada área marcada (cuadro de '+mesLargo(basesDe(ym(m.fecha)).ym||ym(m.fecha))+')</div><div>'+checks+'</div>'
     +'<div class="repcalc"><span id="repN"></span><b id="repV"></b></div>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn btn-secondary" id="repTodas">Todas</button><button class="btn btn-ghost" id="repCancel">Cancelar</button><button class="btn btn-success" id="repOk">Guardar</button></div></div>';
   document.body.appendChild(w);
   function marcadas(){return Array.prototype.filter.call(w.querySelectorAll('.repChk'),function(c){return c.checked;}).map(function(c){return c.value;});}
   function prev(){var l=marcadas();$('repOk').disabled=!l.length;
-    if(!l.length){$('repN').textContent='Marca al menos un área';$('repV').textContent='';return;}
-    var c=Math.round(monto(m)*100),p=Math.ceil(c/l.length)/100;
-    $('repN').textContent='Cada área · '+l.length+(l.length===1?' área':' áreas')+' →';$('repV').textContent=(m.moneda==='USD'?U:S)(p);}
+    var mon=m.moneda==='USD'?U:S,prueba={fecha:m.fecha,esFijo:true,reparto:l.join(',')},partes={},n=0;
+    if(l.length)repartirGrupos(prueba,monto(m),function(g,v){partes[g.k]=v;n+=(+g.n||0);});
+    Array.prototype.forEach.call(w.querySelectorAll('.repv'),function(b){b.textContent=partes[b.dataset.k]!=null?mon(partes[b.dataset.k]):'';});
+    $('repN').textContent=l.length?(l.length+(l.length===1?' área':' áreas')+' · '+n+' colaboradores'):'Marca al menos un área';
+    $('repV').textContent=l.length?mon(monto(m)):'';}
   Array.prototype.forEach.call(w.querySelectorAll('.repChk'),function(c){c.onchange=prev;});prev();
   $('repTodas').onclick=function(){Array.prototype.forEach.call(w.querySelectorAll('.repChk'),function(c){c.checked=true;});prev();};
   $('repCancel').onclick=function(){w.remove();};
   w.onclick=function(e){if(e.target===w)w.remove();};
   $('repOk').onclick=async function(){
     var l=marcadas();if(!l.length)return;
-    m.reparto=(l.length===AREAS_REPARTO.length)?'':l.join(',');
+    m.reparto=(l.length===G.length)?'':l.join(',');
     w.remove();await updateMov(m);renderActual();
   };
 }
@@ -1452,8 +1482,64 @@ function renderCAC(){
 
 // ============ COSTOS FIJOS ============
 function claveGasto(m){return ((m.mov||'')+' '+(m.desc||'')).toUpperCase().replace(/[0-9]+/g,'').replace(/[^A-ZÁÉÍÓÚÑ ]/g,' ').replace(/\s+/g,' ').trim();}
+// Cuadro de colaboradores: carga, edición y guardado
+async function cargarBases(){
+  var q=await sb.from('fijos_bases').select('*');
+  if(q.error){HAS_BASES=false;DB.bases={};return;}
+  HAS_BASES=true;DB.bases={};(q.data||[]).forEach(function(r){DB.bases[r.ym]=(r.grupos||[]).map(function(g){return {k:String(g.k),l:String(g.l||''),n:+g.n||0,areas:Array.isArray(g.areas)?g.areas:[]};});});
+}
+var BASES_EDIT=null;
+function basesEditDe(ymStr){if(!BASES_EDIT||BASES_EDIT.ym!==ymStr)BASES_EDIT={ym:ymStr,grupos:JSON.parse(JSON.stringify(gruposDe(ymStr)))};return BASES_EDIT;}
+function leerCuadro(){
+  var E=BASES_EDIT;Array.prototype.forEach.call(document.querySelectorAll('#cuadro tr[data-i]'),function(tr){var g=E.grupos[+tr.dataset.i];if(!g)return;
+    g.l=tr.querySelector('.cNom').value;g.n=Math.max(0,+tr.querySelector('.cN').value||0);
+    g.areas=Array.prototype.filter.call(tr.querySelectorAll('.cA'),function(c){return c.checked;}).map(function(c){return c.value;});});
+}
+async function guardarCuadro(ymStr){
+  leerCuadro();var gs=BASES_EDIT.grupos.map(function(g,i){return {k:g.k||('g'+Date.now().toString(36)+i),l:(g.l||'').trim(),n:+g.n||0,areas:g.areas};});
+  if(!gs.length){alert('El cuadro necesita al menos un área.');return;}
+  if(gs.some(function(g){return !g.l;})){alert('Ponle nombre a todas las áreas del cuadro.');return;}
+  if(gs.some(function(g){return !g.areas.length;})){alert('Cada área del cuadro debe sumarse en al menos un área de la distribución.');return;}
+  if(!gs.some(function(g){return g.n>0;})){alert('Escribe cuántos colaboradores tiene cada área.');return;}
+  setSync('guardando…');
+  var r=await sb.from('fijos_bases').upsert({ym:ymStr,grupos:gs,actualizado:new Date().toISOString()},{onConflict:'ym'});
+  if(r.error){setSync('error: '+r.error.message);alert('No se guardó el cuadro: '+r.error.message);return;}
+  DB.bases[ymStr]=gs;BASES_EDIT=null;SILENT=true;setSync('');SILENT=false;toast('Cuadro de colaboradores guardado para '+mesLargo(ymStr));renderActual();
+}
+function cuadroHtml(ymStr,sumas,editable){
+  var E=editable?basesEditDe(ymStr):{grupos:gruposDe(ymStr)},vig=basesDe(ymStr).ym,totN=E.grupos.reduce(function(s,g){return s+(+g.n||0);},0);
+  var filas=E.grupos.map(function(g,i){var n=+g.n||0,pct=totN?n/totN*100:0,sm=sumas&&sumas[g.k]||{s:0,u:0};
+    var destino=editable?'<div style="display:flex;flex-wrap:wrap;gap:4px 12px;min-width:340px;max-width:420px">'+AREAS_DESTINO.map(function(a){return '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap"><input type="checkbox" class="chk cA" value="'+a+'"'+(g.areas.indexOf(a)!==-1?' checked':'')+'>'+esc(a==='EVOLUTION'?'Evolution':areaLabel(a))+'</label>';}).join('')+'</div>'
+      :'<span class="muted" style="font-size:12.5px">'+esc(g.areas.map(function(a){return a==='EVOLUTION'?'Evolution':areaLabel(a);}).join(' + '))+'</span>';
+    return '<tr data-i="'+i+'"><td class="full">'+(editable?'<input class="input-ghost b cNom" value="'+esc(g.l)+'" placeholder="Nombre del área" style="min-width:130px">':'<b>'+esc(g.l)+'</b>')+'</td>'
+      +'<td class="num" data-l="N° colaboradores">'+(editable?'<input type="number" min="0" step="1" class="input-ghost cN" value="'+n+'" style="width:80px;text-align:right;font-weight:700">':'<b>'+n+'</b>')+'</td>'
+      +'<td class="num" data-l="%">'+pct.toFixed(1)+'%</td>'
+      +'<td class="num" data-l="Costo fijo S/">'+S(sm.s)+'</td><td class="num usd" data-l="Costo fijo $">'+U(sm.u)+'</td>'
+      +'<td class="num muted" data-l="S/ por colaborador">'+(n?S(sm.s/n):'—')+'</td>'
+      +'<td data-l="Se suma en">'+destino+'</td>'
+      +(editable?'<td style="width:40px"><button class="btn-danger cDel" data-i="'+i+'" title="Quitar área" aria-label="Quitar área">'+ico('trash')+'</button></td>':'')+'</tr>';}).join('');
+  var tS=0,tU=0;E.grupos.forEach(function(g){var sm=sumas&&sumas[g.k];if(sm){tS+=sm.s;tU+=sm.u;}});
+  return '<div class="card" id="cuadroCard"><div class="card-head"><div><h2 class="card-title">Colaboradores por área</h2><div class="card-sub">Los costos fijos se reparten según este cuadro · '
+    +(vig?(vig===ymStr?'guardado para '+mesLargo(ymStr):'vigente desde '+mesLargo(vig)):'cuadro por defecto')+' · rige en los meses siguientes hasta que lo cambies</div></div></div>'
+    +'<div class="tablewrap"><table class="table cards" id="cuadro"><thead><tr><th>Área</th><th class="num">N° colaboradores</th><th class="num">%</th><th class="num">Costo fijo S/</th><th class="num">Costo fijo $</th><th class="num">S/ por colab.</th><th>Se suma en (distribución)</th>'+(editable?'<th></th>':'')+'</tr></thead><tbody>'+filas
+    +'<tr class="total"><td>TOTAL</td><td class="num" data-l="N° colaboradores">'+totN+'</td><td class="num" data-l="%">100%</td><td class="num" data-l="Costo fijo S/">'+S(tS)+'</td><td class="num usd" data-l="Costo fijo $">'+U(tU)+'</td><td class="num" data-l="S/ por colaborador">'+(totN?S(tS/totN):'—')+'</td><td></td>'+(editable?'<td></td>':'')+'</tr></tbody></table></div>'
+    +(editable?'<div class="actions"><button class="btn btn-secondary" id="cAdd">'+ico('plus')+'Agregar área</button><button class="btn btn-primary" id="cSave">'+ico('floppy-disk')+'Guardar cuadro para '+mesLargo(ymStr)+'</button><span class="muted" style="font-size:12.5px">Si una área se suma en dos áreas de la distribución (como Ventas y Mkt), su parte se divide mitad y mitad.</span></div>'
+      :(!READONLY&&!HAS_BASES?'<p class="nota">Falta la tabla fijos_bases en la base de datos: se usa el cuadro por defecto.</p>':''))+'</div>';
+}
+function wireCuadro(ymStr){
+  var add=$('cAdd');if(add)add.onclick=function(){leerCuadro();BASES_EDIT.grupos.push({k:'',l:'',n:0,areas:[]});renderActual();};
+  Array.prototype.forEach.call(document.querySelectorAll('#cuadro .cDel'),function(b){b.onclick=function(){leerCuadro();BASES_EDIT.grupos.splice(+b.dataset.i,1);renderActual();};});
+  var sv=$('cSave');if(sv)sv.onclick=function(){guardarCuadro(ymStr);};
+}
+function sumarGrupos(movs){
+  var by={},T={s:0,u:0,eq:0};
+  movs.forEach(function(m){if(!(m.cargo>0)||!m.esFijo)return;var usd=m.moneda==='USD',tc=usd?tcDe(m):1;
+    repartirGrupos(m,m.cargo,function(g,v){var o=by[g.k]=by[g.k]||{s:0,u:0,eq:0,l:g.l};if(usd){o.u+=v;T.u+=v;}else{o.s+=v;T.s+=v;}o.eq+=v*tc;T.eq+=v*tc;});});
+  return {by:by,tot:T};
+}
 function renderFijos(){
   var f=F(),base=movsFiltro(),box=$('fijosBody');
+  var ymC=f.rango?(f.d?ym(f.d):f.ym):f.ym,editable=!READONLY&&HAS_BASES;
   var fijos=base.filter(function(m){return m.cargo>0&&m.esFijo;}).sort(function(a,b){return b.cargo-a.cargo;});
   // posibles fijos: egresos del período con la misma descripción que un gasto ya marcado como fijo
   var conocidas={};allMovs().forEach(function(m){if(m.cargo>0&&m.esFijo)conocidas[claveGasto(m)]=m;});
@@ -1463,30 +1549,32 @@ function renderFijos(){
     +sug.slice(0,5).map(function(m){var ref=conocidas[claveGasto(m)];return '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap"><span style="flex:1;min-width:200px"><b>'+dmy(m.fecha)+' · '+esc(m.desc||m.mov)+'</b> · <b class="neg">'+fmtMon(m)+'</b> — igual a un gasto que ya marcaste como fijo. Se copiará el reparto <b>'+esc(repartoTxt(ref))+'</b>.</span>'
       +(READONLY?'':'<button class="btn btn-brand btn-sm sugFijo" data-sig="'+encodeURIComponent(sigOf(m))+'">Marcar fijo</button>')+'</div>';}).join('')
     +(sug.length>5?'<div class="muted" style="margin-top:6px;font-size:12.5px">+ '+(sug.length-5)+' más</div>':'')+'</div></div>';
-  if(!fijos.length){box.innerHTML=sugHtml+'<div class="card">'+emptyHtml('buildings','No hay costos fijos en este período','En Movimientos, abre un egreso y marca "Es costo fijo".','dash')+'</div>';wireFijos(conocidas);return;}
-  var x=sumarAreas(fijos,AREAS_REPARTO),T=x.tot;
-  var r=f.rango?{start:f.d,end:f.h}:monthRange(f.ym);
-  var nColab=DB.asesores.filter(function(a){return activoEnRango(a,r.start,r.end);}).length;
+  var x=sumarGrupos(fijos),T=x.tot,G=gruposDe(ymC),totN=G.reduce(function(s,g){return s+(+g.n||0);},0);
+  var cuadro=cuadroHtml(ymC,x.by,editable);
+  if(!fijos.length){box.innerHTML=sugHtml+cuadro+'<div class="card">'+emptyHtml('buildings','No hay costos fijos en este período','En Movimientos, abre un egreso y marca "Es costo fijo".','dash')+'</div>';wireFijos(conocidas);wireCuadro(ymC);return;}
   var kpis='<div class="kpis4">'
     +kpiCard('Fijos en soles',S(T.s),periodoTxt(),{vcls:'neg'})
     +kpiCard('Fijos en dólares '+usdTag(),U(T.u),'sin convertir',{vcls:'neg'})
     +kpiCard('Gastos fijos',fijos.length,'movimientos marcados')
-    +kpiCard('Costo por colaborador',nColab?S(T.s/nColab):'—',nColab?'+ '+U(T.u/nColab)+' · '+nColab+' activos':'Agrega el personal en Ventas',{cls:'kpi-hero'})+'</div>';
-  var maxEq=Math.max.apply(null,AREAS_REPARTO.map(function(a){return x.by[a].eq;}).concat([1]));
-  var dist='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución por área</h2><div class="card-sub">Cuánto costo fijo carga cada área</div></div></div>'
-    +AREAS_REPARTO.map(function(a){var o=x.by[a],pct=T.eq?o.eq/T.eq*100:0;return '<div class="inlinebars"><span class="n">'+areaDot(a)+esc(areaLabel(a))+'</span><div class="track"><div class="fill" style="width:'+(o.eq/maxEq*100).toFixed(1)+'%;background:'+(AREA_COLOR[a]||'#64748b')+'"></div></div><span class="v"><b>'+pct.toFixed(1)+'%</b> · '+S(o.s)+' · <span class="usd">'+U(o.u)+'</span></span></div>';}).join('')
+    +kpiCard('Costo por colaborador',totN?S(T.s/totN):'—',totN?'+ '+U(T.u/totN)+' · '+totN+' colaboradores':'Completa el cuadro de colaboradores',{cls:'kpi-hero'})+'</div>';
+  // columnas: áreas del cuadro del mes, más las que aparezcan en otros meses del rango
+  var cols=G.map(function(g){return {k:g.k,l:g.l};});Object.keys(x.by).forEach(function(k){if(!cols.some(function(c){return c.k===k;}))cols.push({k:k,l:x.by[k].l});});
+  var maxEq=Math.max.apply(null,cols.map(function(c){return x.by[c.k]?x.by[c.k].eq:0;}).concat([1]));
+  var pal=['#fbbf24','#a78bfa','#60a5fa','#fb923c','#34d399','#22d3ee','#f472b6','#94a3b8'];
+  var dist='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución por área</h2><div class="card-sub">Cuánto costo fijo carga cada área del cuadro</div></div></div>'
+    +cols.map(function(c,i){var o=x.by[c.k]||{s:0,u:0,eq:0},pct=T.eq?o.eq/T.eq*100:0;return '<div class="inlinebars"><span class="n"><span class="dot" style="background:'+pal[i%pal.length]+'"></span>'+esc(c.l)+'</span><div class="track"><div class="fill" style="width:'+(o.eq/maxEq*100).toFixed(1)+'%;background:'+pal[i%pal.length]+'"></div></div><span class="v"><b>'+pct.toFixed(1)+'%</b> · '+S(o.s)+' · <span class="usd">'+U(o.u)+'</span></span></div>';}).join('')
     +'<div class="inlinebars" style="border:0"><b style="flex:1">Total</b><span class="v"><b>'+S(T.s)+' · <span class="usd">'+U(T.u)+'</span> · 100%</b></span></div>'
-    +'<p class="nota">Soles y dólares por separado. El % suma los dólares al TC del mes. Evolution es una entidad aparte: su parte no entra en el 100% de las áreas de Grupo Robles.</p></div>';
-  var head='<tr><th>Gasto</th><th class="num">Monto</th><th>Reparto</th>'+AREAS_REPARTO.map(function(a){return '<th class="num">'+esc(a==='EVOLUTION'?'Evolution':areaLabel(a))+'</th>';}).join('')+(READONLY?'':'<th>Fijo</th>')+'</tr>';
-  var body=fijos.map(function(m){var se=encodeURIComponent(sigOf(m)),partes={};repartir(m,m.cargo,function(a,v){partes[a]=v;});var mon=m.moneda==='USD'?U:S;
+    +'<p class="nota">Soles y dólares por separado. El % suma los dólares al TC del mes. En la distribución de Movimientos, la parte de cada área se suma donde indica el cuadro; Evolution es una entidad aparte y queda fuera del 100%.</p></div>';
+  var head='<tr><th>Gasto</th><th class="num">Monto</th><th>Reparto</th>'+cols.map(function(c){return '<th class="num">'+esc(c.l)+'</th>';}).join('')+(READONLY?'':'<th>Fijo</th>')+'</tr>';
+  var body=fijos.map(function(m){var se=encodeURIComponent(sigOf(m)),partes={};repartirGrupos(m,m.cargo,function(g,v){partes[g.k]=v;});var mon=m.moneda==='USD'?U:S;
     return '<tr><td class="full"><b>'+esc(m.desc||m.mov)+'</b><div class="sub">'+dmy(m.fecha)+(m.obs?' · '+esc(m.obs):'')+'</div></td><td class="num" data-l="Monto">'+montoHtml(m)+'</td>'
       +'<td data-l="Reparto">'+(READONLY?'<span class="muted">÷ '+esc(repartoTxt(m))+'</span>':'<button class="repbtn fRep" data-sig="'+se+'">÷ '+esc(repartoTxt(m))+'</button>')+'</td>'
-      +AREAS_REPARTO.map(function(a){return '<td class="num" data-l="'+esc(a==='EVOLUTION'?'Evolution':areaLabel(a))+'">'+(partes[a]!=null?'<span'+(m.moneda==='USD'?' class="usd"':'')+'>'+mon(partes[a])+'</span>':'<span class="muted3">—</span>')+'</td>';}).join('')
+      +cols.map(function(c){return '<td class="num" data-l="'+esc(c.l)+'">'+(partes[c.k]!=null?'<span'+(m.moneda==='USD'?' class="usd"':'')+'>'+mon(partes[c.k])+'</span>':'<span class="muted3">—</span>')+'</td>';}).join('')
       +(READONLY?'':'<td data-l="Fijo"><input type="checkbox" class="chk fijoOff" data-sig="'+se+'" checked aria-label="Es costo fijo"></td>')+'</tr>';}).join('');
-  var tot='<tr class="total"><td>Total por área</td><td></td><td></td>'+AREAS_REPARTO.map(function(a){var o=x.by[a];return '<td class="num" data-l="'+esc(a==='EVOLUTION'?'Evolution':areaLabel(a))+'"><div class="stack">'+(o.s?'<span>'+S(o.s)+'</span>':'')+(o.u?'<span class="usd">'+U(o.u)+'</span>':'')+(o.s||o.u?'':'—')+'</div></td>';}).join('')+(READONLY?'':'<td></td>')+'</tr>';
-  var mat='<div class="card"><div class="card-head"><div><h2 class="card-title">Detalle por gasto</h2><div class="card-sub">Cómo se reparte cada costo fijo'+(READONLY?'':' · toca ÷ para elegir las áreas')+'</div></div></div><div class="tablewrap"><table class="table cards"><thead>'+head+'</thead><tbody>'+body+tot+'</tbody></table></div></div>';
-  box.innerHTML=kpis+sugHtml+dist+mat;
-  wireFijos(conocidas);
+  var tot='<tr class="total"><td>Total por área</td><td></td><td></td>'+cols.map(function(c){var o=x.by[c.k]||{s:0,u:0};return '<td class="num" data-l="'+esc(c.l)+'"><div class="stack">'+(o.s?'<span>'+S(o.s)+'</span>':'')+(o.u?'<span class="usd">'+U(o.u)+'</span>':'')+(o.s||o.u?'':'—')+'</div></td>';}).join('')+(READONLY?'':'<td></td>')+'</tr>';
+  var mat='<div class="card"><div class="card-head"><div><h2 class="card-title">Detalle por gasto</h2><div class="card-sub">Cómo se reparte cada costo fijo según el cuadro'+(READONLY?'':' · toca ÷ para elegir qué áreas participan')+'</div></div></div><div class="tablewrap"><table class="table cards"><thead>'+head+'</thead><tbody>'+body+tot+'</tbody></table></div></div>';
+  box.innerHTML=kpis+sugHtml+cuadro+dist+mat;
+  wireFijos(conocidas);wireCuadro(ymC);
 }
 function wireFijos(conocidas){
   if(READONLY)return;var box=$('fijosBody');
