@@ -296,7 +296,10 @@ function areasReparto(m){
   var l=(m.reparto||'').split(',').filter(function(a){return AREAS_REPARTO.indexOf(a)!==-1;});
   return l.length?l:AREAS_REPARTO.slice();
 }
-function repartir(m,monto,fn){var l=areasReparto(m);var p=monto/l.length;l.forEach(function(a){fn(a,p);});}
+// Reparte al céntimo: las partes siempre suman exactamente el monto original
+function repartir(m,monto,fn){var l=areasReparto(m);if(l.length===1){fn(l[0],monto);return;}
+  var c=Math.round(monto*100),base=Math.floor(c/l.length),resto=c-base*l.length;
+  l.forEach(function(a,i){fn(a,(base+(i<resto?1:0))/100);});}
 function repartoTxt(m){var l=areasReparto(m);return l.length===AREAS_REPARTO.length?'Todas ('+l.length+')':l.map(function(a){return a==='EVOLUTION'?'Evolution':areaLabel(a);}).join(', ');}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function clasificar(mov,desc,abono){var h=(mov+' '+desc).toUpperCase();for(var i=0;i<REGLAS.length;i++)if(h.indexOf(REGLAS[i][0])!==-1)return REGLAS[i][1];return (abono&&abono>0)?'INGRESO':'REVISAR';}
@@ -315,20 +318,16 @@ function esIngreso(m){return m.abono>0;}
 function monto(m){return m.cargo>0?m.cargo:m.abono;}
 function fmtMon(m){return (m.moneda==='USD'?'$ ':'S/ ')+nf(monto(m));}
 function rgba(hex,a){var n=parseInt(hex.slice(1),16);return 'rgba('+(n>>16&255)+','+(n>>8&255)+','+(n&255)+','+a+')';}
-function sigOf(m){return [m.fecha,m.mov,m.desc,m.cargo,m.abono,m.saldoCont].join('|');}
+// Firma (clave en la BD). Los movimientos ya guardados usan la que tienen en la BD;
+// los nuevos incluyen la moneda (= la cuenta: PEN 5939, USD 5946) para que no choquen entre cuentas.
+function sigOf(m){return m.sig||[m.fecha,m.mov,m.desc,m.cargo,m.abono,m.saldoCont,m.moneda].join('|');}
 // firma ESTABLE para detectar duplicados sin depender del saldo corrido (que cambia entre descargas)
 function baseKey(m){return [m.fecha,m.mov,m.desc,m.cargo,m.abono,m.moneda].join('|');}
 
 // ============ Data layer (Supabase) ============
-function rowToMov(r){return {fecha:r.fecha,mov:r.mov||'',desc:r.descripcion||'',numOp:r.numero_operacion||'',moneda:r.moneda,cargo:+r.cargo||0,abono:+r.abono||0,saldoCont:r.saldo_cont!=null?+r.saldo_cont:'',tc:r.tc!=null?+r.tc:null,area:r.area,obs:r.obs||'',asesor:r.asesor||'',clas:r.clasificacion||'',cliente:r.cliente||'',lote:r.lote||'',m2:r.m2!=null?+r.m2:'',concepto:r.concepto||'',cuota:r.cuota||'',metodoPago:r.metodo_pago||'',personal:r.personal||'',esFijo:!!r.es_fijo,proyecto:r.proyecto||'',reparto:r.reparto||''};}
+function rowToMov(r){return {sig:r.sig,fecha:r.fecha,mov:r.mov||'',desc:r.descripcion||'',numOp:r.numero_operacion||'',moneda:r.moneda,cargo:+r.cargo||0,abono:+r.abono||0,saldoCont:r.saldo_cont!=null?+r.saldo_cont:'',tc:r.tc!=null?+r.tc:null,area:r.area,obs:r.obs||'',asesor:r.asesor||'',clas:r.clasificacion||'',cliente:r.cliente||'',lote:r.lote||'',m2:r.m2!=null?+r.m2:'',concepto:r.concepto||'',cuota:r.cuota||'',metodoPago:r.metodo_pago||'',personal:r.personal||'',esFijo:!!r.es_fijo,proyecto:r.proyecto||'',reparto:r.reparto||''};}
 function movToRow(m){var row={sig:sigOf(m),fecha:m.fecha,mov:m.mov,descripcion:m.desc,numero_operacion:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldo_cont:(m.saldoCont===''||m.saldoCont==null)?null:m.saldoCont,tc:m.tc,area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)row.reparto=m.reparto||'';return row;}
 function setSync(t){document.getElementById('sync').textContent=t?('· '+t):'';}
-async function migrarClasLegacy(){
-  // Corrige movimientos guardados con el área VENTAS/COBRANZA (versión previa) → pasa el valor a Clasificación
-  var fix=allMovs().filter(function(m){return esIngreso(m)&&!m.clas&&(m.area==='VENTAS'||m.area==='COBRANZA');});
-  if(!fix.length)return;
-  for(var i=0;i<fix.length;i++){var m=fix[i];m.clas=m.area;m.area='INGRESO';await updateMov(m);}
-}
 async function cargarNube(){
   setSync('cargando…');
   DB.movs={}; var desde=0, tam=1000, total=0;
@@ -342,7 +341,6 @@ async function cargarNube(){
   }
   var t1=await sb.from('movimientos').select('reparto').limit(1); HAS_REPARTO=!t1.error;
   var t2=await sb.from('saldos').select('tc').limit(1); HAS_TC=!t2.error;
-  await migrarClasLegacy();
   var sl=await sb.from('saldos').select('*');
   if(sl.error) throw sl.error;
   DB.saldos={}; (sl.data||[]).forEach(function(r){DB.saldos[r.ym]={soles:r.soles!=null?+r.soles:null,dolares:r.dolares!=null?+r.dolares:null,tc:r.tc!=null?+r.tc:null};});
@@ -376,9 +374,9 @@ async function guardarMetasPersonalBatch(ymStr,filas){
   await cargarMetasPersonal();
   setSync('guardado ✓');
 }
-async function upsertMovs(list){ if(!list.length)return; setSync('guardando…'); var r=await sb.from('movimientos').upsert(list.map(movToRow),{onConflict:'sig',ignoreDuplicates:true}); setSync(r.error?('error: '+r.error.message):'guardado ✓'); }
+async function upsertMovs(list){ if(!list.length)return null; setSync('guardando…'); var r=await sb.from('movimientos').upsert(list.map(movToRow),{onConflict:'sig',ignoreDuplicates:true}); setSync(r.error?('error: '+r.error.message):'guardado ✓'); return r.error||null; }
 var obsTimers={};
-async function updateMov(m){ setSync('guardando…'); var patch={area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)patch.reparto=m.reparto||'';var r=await sb.from('movimientos').update(patch).eq('sig',sigOf(m)); setSync(r.error?('error: '+r.error.message):'guardado ✓'); }
+async function updateMov(m){ setSync('guardando…'); var patch={area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)patch.reparto=m.reparto||'';var r=await sb.from('movimientos').update(patch).eq('sig',sigOf(m)); setSync(r.error?('error: '+r.error.message):'guardado ✓'); if(r.error)alert('No se guardó el cambio: '+r.error.message+'\nRecarga la página para ver el dato real.'); }
 function updateObsDebounced(sig){ clearTimeout(obsTimers[sig]); obsTimers[sig]=setTimeout(function(){ if(DB.movs[sig])updateMov(DB.movs[sig]); },700); }
 async function guardarTC(ymStr,v){
   if(!HAS_TC){alert('Falta agregar la columna tc en la tabla saldos (ver SQL de reparto y TC).');return;}
@@ -388,7 +386,7 @@ async function guardarTC(ymStr,v){
   var o=DB.saldos[ymStr]||{soles:null,dolares:null};o.tc=v||null;DB.saldos[ymStr]=o;
   setSync('TC guardado ✓');
 }
-async function upsertSaldo(ymStr,o){ var r=await sb.from('saldos').upsert({ym:ymStr,soles:o.soles!=null?o.soles:null,dolares:o.dolares!=null?o.dolares:null},{onConflict:'ym'}); if(r.error)setSync('error saldo'); }
+async function upsertSaldo(ymStr,o){ var r=await sb.from('saldos').upsert({ym:ymStr,soles:o.soles!=null?o.soles:null,dolares:o.dolares!=null?o.dolares:null},{onConflict:'ym'}); if(r.error)setSync('error saldo'); return r.error||null; }
 async function deleteMov(sig){
   if(READONLY)return;
   if(!confirm('¿Eliminar este movimiento? Esta acción no se puede deshacer.'))return;
@@ -431,15 +429,15 @@ function activoEnMes(a,ymStr){
 function asesorOpts(actual,ymStr){
   var opts=['<option value="">—</option>'];
   var vistos={};
-  DB.asesores.forEach(function(a){ if(areaDe(a)!=='Ventas')return; if(!activoEnMes(a,ymStr)&&a.nombre!==actual)return; vistos[a.nombre]=true; opts.push('<option value="'+a.nombre+'"'+(a.nombre===actual?' selected':'')+'>'+a.nombre+'</option>'); });
-  if(actual&&!vistos[actual])opts.push('<option value="'+actual+'" selected>'+actual+'</option>');
+  DB.asesores.forEach(function(a){ if(areaDe(a)!=='Ventas')return; if(!activoEnMes(a,ymStr)&&a.nombre!==actual)return; vistos[a.nombre]=true; opts.push('<option value="'+esc(a.nombre)+'"'+(a.nombre===actual?' selected':'')+'>'+esc(a.nombre)+'</option>'); });
+  if(actual&&!vistos[actual])opts.push('<option value="'+esc(actual)+'" selected>'+esc(actual)+'</option>');
   return opts.join('');
 }
 function personalOpts(actual,ymStr){
   var opts=['<option value="">—</option>'];
   var vistos={};
-  DB.asesores.forEach(function(a){ if(!activoEnMes(a,ymStr)&&a.nombre!==actual)return; vistos[a.nombre]=true; opts.push('<option value="'+a.nombre+'"'+(a.nombre===actual?' selected':'')+'>'+a.nombre+' · '+areaDe(a)+'</option>'); });
-  if(actual&&!vistos[actual])opts.push('<option value="'+actual+'" selected>'+actual+'</option>');
+  DB.asesores.forEach(function(a){ if(!activoEnMes(a,ymStr)&&a.nombre!==actual)return; vistos[a.nombre]=true; opts.push('<option value="'+esc(a.nombre)+'"'+(a.nombre===actual?' selected':'')+'>'+esc(a.nombre)+' · '+areaDe(a)+'</option>'); });
+  if(actual&&!vistos[actual])opts.push('<option value="'+esc(actual)+'" selected>'+esc(actual)+'</option>');
   return opts.join('');
 }
 async function agregarAsesor(nombre,area,desde){
@@ -457,17 +455,12 @@ async function renombrarAsesor(id,nombre){
   var viejo=prev?prev.nombre:null;
   if(viejo===nombre)return;
   setSync('guardando…');
-  var r=await sb.from('asesores').update({nombre:nombre}).eq('id',id);
-  if(r.error){alert(r.error.message.indexOf('duplicate')!==-1?'Ese nombre ya existe.':r.error.message);setSync('');await cargarAsesores();return;}
+  // renombrar_personal (función en la BD) actualiza personal, movimientos y metas en una sola transacción: todo o nada
+  var r=await sb.rpc('renombrar_personal',{p_id:id,p_nombre:nombre});
+  if(r.error){alert(/duplicate|unique/i.test(r.error.message)?'Ese nombre ya existe (o ya tiene metas en el mismo mes).':'No se cambió el nombre: '+r.error.message);setSync('');await cargarAsesores();renderActual();return;}
   if(viejo){
-    // el nombre se guarda como texto en cada movimiento y meta: se actualiza para no perder su historial
-    var r1=await sb.from('movimientos').update({asesor:nombre}).eq('asesor',viejo);
-    var r2=await sb.from('movimientos').update({personal:nombre}).eq('personal',viejo);
-    var r3=await sb.from('metas_personal').update({nombre:nombre}).eq('nombre',viejo);
     allMovs().forEach(function(m){if(m.asesor===viejo)m.asesor=nombre;if(m.personal===viejo)m.personal=nombre;});
     Object.keys(DB.metasPersonal).forEach(function(y){var o=DB.metasPersonal[y];if(o[viejo]){o[nombre]=o[viejo];delete o[viejo];}});
-    var e=r1.error||r2.error||r3.error;
-    if(e){alert('Se cambió el nombre, pero no se pudo actualizar todo su historial: '+e.message);}
   }
   await cargarAsesores();
   setSync('guardado ✓');
@@ -521,22 +514,37 @@ function procesar(){
   document.getElementById('previewCard').style.display='block';
   document.getElementById('prevInfo').textContent='· '+built.length+' leídos · '+nuevos.length+' nuevos · '+(built.length-nuevos.length)+' ya guardados';
   document.getElementById('prevBody').innerHTML=built.slice(0,300).map(function(m){var isNew=esNuevo.has(m);var ing=esIngreso(m);
-    return '<tr style="opacity:'+(isNew?1:.45)+'"><td>'+dmy(m.fecha)+'</td><td>'+m.mov+'</td><td>'+m.desc+'</td><td>'+m.moneda+'</td><td class="num '+(ing?'m-ing':'m-egr')+'">'+fmtMon(m)+'</td><td><span class="tipo '+(ing?'t-ing':'t-egr')+'">'+(ing?'Ingreso':'Egreso')+'</span></td><td>'+areaLabel(m.area)+'</td></tr>';}).join('');
-  document.getElementById('save').style.display=(nuevos.length&&!READONLY)?'inline-block':'none';
+    return '<tr style="opacity:'+(isNew?1:.45)+'"><td>'+dmy(m.fecha)+'</td><td>'+esc(m.mov)+'</td><td>'+esc(m.desc)+'</td><td>'+m.moneda+'</td><td class="num '+(ing?'m-ing':'m-egr')+'">'+fmtMon(m)+'</td><td><span class="tipo '+(ing?'t-ing':'t-egr')+'">'+(ing?'Ingreso':'Egreso')+'</span></td><td>'+areaLabel(m.area)+'</td></tr>';}).join('');
+  var sd=saldoDelArchivo(PREVIEW);
+  document.getElementById('save').style.display=((nuevos.length||(sd&&sd.cambia))&&!READONLY)?'inline-block':'none';
+}
+// Saldo del banco que trae el archivo, para el último mes del archivo
+function saldoDelArchivo(P){
+  var months={};P.built.forEach(function(m){months[ym(m.fecha)]=true;});
+  var lastM=Object.keys(months).sort().pop();if(!lastM)return null;
+  var prev=DB.saldos[lastM]||{};var o={soles:prev.soles!=null?prev.soles:null,dolares:prev.dolares!=null?prev.dolares:null,tc:prev.tc!=null?prev.tc:null};
+  if(P.saldos.S&&P.saldos.S.saldo!=null)o.soles=P.saldos.S.saldo;
+  if(P.saldos.D&&P.saldos.D.saldo!=null)o.dolares=P.saldos.D.saldo;
+  return {ym:lastM,o:o,cambia:o.soles!==(prev.soles!=null?prev.soles:null)||o.dolares!==(prev.dolares!=null?prev.dolares:null)};
 }
 async function guardar(){
   if(!PREVIEW||READONLY)return;
+  var btn=document.getElementById('save');btn.disabled=true;hideErr();
   var n=PREVIEW.nuevos.length;
-  await upsertMovs(PREVIEW.nuevos);
-  PREVIEW.nuevos.forEach(function(m){DB.movs[sigOf(m)]=m;});
-  var months={};PREVIEW.built.forEach(function(m){months[ym(m.fecha)]=true;});
-  var lastM=Object.keys(months).sort().pop();
-  if(lastM){var o=DB.saldos[lastM]||{};
-    if(PREVIEW.saldos.S&&PREVIEW.saldos.S.saldo!=null)o.soles=PREVIEW.saldos.S.saldo;
-    if(PREVIEW.saldos.D&&PREVIEW.saldos.D.saldo!=null)o.dolares=PREVIEW.saldos.D.saldo;
-    DB.saldos[lastM]=o; await upsertSaldo(lastM,o);}
-  showOk('✓ Guardado en la nube: '+n+' movimientos nuevos. Total: '+Object.keys(DB.movs).length+'. Ve a "Mes" para clasificar.');
-  document.getElementById('save').style.display='none';
+  // 1) movimientos: si falla, no se toca nada en pantalla y se puede reintentar
+  PREVIEW.nuevos.forEach(function(m){m.sig=sigOf(m);});
+  var e1=await upsertMovs(PREVIEW.nuevos);
+  if(e1){btn.disabled=false;showErr('No se guardó nada: '+e1.message+'. Revisa tu conexión y vuelve a tocar "Guardar en la nube".');return;}
+  PREVIEW.nuevos.forEach(function(m){DB.movs[m.sig]=m;});
+  PREVIEW.nuevos=[];
+  // 2) saldo del banco: si falla, los movimientos ya quedaron guardados y el botón permite reintentar solo el saldo
+  var sd=saldoDelArchivo(PREVIEW);
+  if(sd){var e2=await upsertSaldo(sd.ym,sd.o);
+    if(e2){btn.disabled=false;btn.textContent='💾 Reintentar guardar saldo';buildFilters();
+      showErr((n?'Se guardaron '+n+' movimientos nuevos, pero el saldo del banco no: ':'No se guardó el saldo del banco: ')+e2.message+'. Vuelve a tocar el botón (no se duplican movimientos).');return;}
+    DB.saldos[sd.ym]=sd.o;}
+  showOk(n?('✓ Guardado en la nube: '+n+' movimientos nuevos. Total: '+Object.keys(DB.movs).length+'. Ve a "Movimientos" para clasificar.'):'✓ Saldo del banco guardado.');
+  btn.style.display='none';btn.disabled=false;btn.textContent='💾 Guardar en la nube';
   PREVIEW=null;PEND={S:null,D:null};
   buildFilters();
 }
@@ -607,10 +615,10 @@ function renderMes(){
   var segRows=ds.map(function(d){return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num">'+(d.gastadoU?U(d.gastadoU):'—')+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.ops+'</td></tr>';}).join('');
   var segCard='<div class="card"><h3>Otros egresos <span class="m">· fuera del núcleo, no afectan el 100%</span></h3><div class="tablescroll"><table><thead><tr><th>Área</th><th class="num">Gastado S/</th><th class="num">Gastado $</th><th class="num">% s/ Egreso</th><th class="num"># Ops</th></tr></thead><tbody>'+segRows+'<tr style="font-weight:700"><td>SUBTOTAL</td><td class="num">'+S(segTot)+'</td><td class="num">'+(segTotU?U(segTotU):'—')+'</td><td class="num"></td><td class="num">'+segOps+'</td></tr></tbody></table></div></div>';
   var areaOpts='<option value="">Todas las áreas</option>'+AREAS.map(function(a){return '<option value="'+a+'"'+(AREAF===a?' selected':'')+'>'+areaLabel(a)+'</option>';}).join('');
-  var asesorFOpts='<option value="">Todos los asesores</option>'+DB.asesores.map(function(a){return '<option value="'+a.nombre+'"'+(ASESORF===a.nombre?' selected':'')+'>'+a.nombre+'</option>';}).join('');
+  var asesorFOpts='<option value="">Todos los asesores</option>'+DB.asesores.map(function(a){return '<option value="'+esc(a.nombre)+'"'+(ASESORF===a.nombre?' selected':'')+'>'+esc(a.nombre)+'</option>';}).join('');
   var clasFOpts='<option value="">Toda clasificación</option>'+Object.keys(CLAS_LABEL).filter(function(c){return c;}).map(function(c){return '<option value="'+c+'"'+(CLASF===c?' selected':'')+'>'+CLAS_LABEL[c]+'</option>';}).join('');
   var det='<div class="card"><h3>Detalle '+(READONLY?'<span class="m">· solo lectura</span>':'· edita el Área y la Observación')+' <span class="m" id="detN"></span></h3>'
-    +'<div class="toolbar"><input class="search" id="detSearch" placeholder="🔎 Buscar (fecha, movimiento, descripción, monto, área…)" value="'+SEARCH.replace(/"/g,'&quot;')+'"><select id="detArea">'+areaOpts+'</select><select id="detAsesor">'+asesorFOpts+'</select><select id="detClas">'+clasFOpts+'</select>'
+    +'<div class="toolbar"><input class="search" id="detSearch" placeholder="🔎 Buscar (fecha, movimiento, descripción, monto, área…)" value="'+esc(SEARCH)+'"><select id="detArea">'+areaOpts+'</select><select id="detAsesor">'+asesorFOpts+'</select><select id="detClas">'+clasFOpts+'</select>'
     +'<span class="chip '+(FILTER==='all'?'on':'')+'" data-f="all">Todos</span><span class="chip '+(FILTER==='rev'?'on':'')+'" data-f="rev">Solo REVISAR</span><span class="chip '+(FILTER==='in'?'on':'')+'" data-f="in">Ingresos</span><span class="chip '+(FILTER==='out'?'on':'')+'" data-f="out">Egresos</span></div>'
     +'<div class="tablescroll"><table><thead><tr><th>Fecha</th><th>Movimiento</th><th>Descripción</th><th class="num">Monto</th><th>Tipo</th><th>Área</th><th>Clasificación <span class="m">(ingresos)</span></th><th>Asesor <span class="m">(ingresos)</span></th><th>Personal <span class="m">(egresos)</span></th><th>Fijo <span class="m">(egresos)</span></th><th>Observación</th>'+(READONLY?'':'<th></th>')+'</tr></thead><tbody id="detBody"></tbody></table></div></div>';
   box.innerHTML=kpis+distCard+segCard+det;
@@ -647,7 +655,7 @@ function renderDetalle(){
     var repBtn=m.esFijo?('<div style="margin-top:4px">'+(READONLY?'<span class="note" title="Reparto del costo fijo">÷ '+esc(repartoTxt(m))+'</span>':'<button class="ghost repBtn" data-sig="'+encodeURIComponent(sig)+'" title="Elegir entre qué áreas se reparte" style="font-size:11px;padding:3px 8px;white-space:nowrap">÷ '+esc(repartoTxt(m))+'</button>')+'</div>'):'';
     var fChk=(!ing)?('<input type="checkbox" class="fijochk" data-sig="'+encodeURIComponent(sig)+'"'+(m.esFijo?' checked':'')+dis+'>'+repBtn):'<span class="note">—</span>';
     var delBtn=READONLY?'':'<td><button class="ghost delBtn" data-sig="'+encodeURIComponent(sig)+'" title="Eliminar">🗑</button></td>';
-    return '<tr class="'+(m.area==='REVISAR'?'rev':'')+'"><td>'+dmy(m.fecha)+'</td><td>'+m.mov+'</td><td>'+m.desc+'</td><td class="num '+(ing?'m-ing':'m-egr')+'">'+fmtMon(m)+'</td><td><span class="tipo '+(ing?'t-ing':'t-egr')+'">'+(ing?'Ingreso':'Egreso')+'</span></td><td>'+sel+'</td><td>'+cSel+'</td><td>'+aSel+'</td><td>'+pSel+'</td><td style="text-align:center">'+fChk+'</td><td><input class="obs" data-sig="'+encodeURIComponent(sig)+'" value="'+(m.obs||'').replace(/"/g,'&quot;')+'" placeholder="—"'+dis+'></td>'+delBtn+'</tr>';}).join('')||'<tr><td colspan="12"><div class="empty">Nada coincide con el filtro.</div></td></tr>';
+    return '<tr class="'+(m.area==='REVISAR'?'rev':'')+'"><td>'+dmy(m.fecha)+'</td><td>'+esc(m.mov)+'</td><td>'+esc(m.desc)+'</td><td class="num '+(ing?'m-ing':'m-egr')+'">'+fmtMon(m)+'</td><td><span class="tipo '+(ing?'t-ing':'t-egr')+'">'+(ing?'Ingreso':'Egreso')+'</span></td><td>'+sel+'</td><td>'+cSel+'</td><td>'+aSel+'</td><td>'+pSel+'</td><td style="text-align:center">'+fChk+'</td><td><input class="obs" data-sig="'+encodeURIComponent(sig)+'" value="'+esc((m.obs||''))+'" placeholder="—"'+dis+'></td>'+delBtn+'</tr>';}).join('')||'<tr><td colspan="12"><div class="empty">Nada coincide con el filtro.</div></td></tr>';
   if(READONLY)return;
   Array.prototype.forEach.call(document.querySelectorAll('#detBody .areasel'),function(sl){sl.onchange=function(){var sig=decodeURIComponent(sl.dataset.sig);if(DB.movs[sig]){DB.movs[sig].area=sl.value;updateMov(DB.movs[sig]);var y=window.scrollY;renderMes();window.scrollTo(0,y);}};});
   Array.prototype.forEach.call(document.querySelectorAll('#detBody .clasel'),function(sl){sl.onchange=function(){var sig=decodeURIComponent(sl.dataset.sig);if(DB.movs[sig]){DB.movs[sig].clas=sl.value;updateMov(DB.movs[sig]);}};});
@@ -698,10 +706,10 @@ function renderAsesorMgmt(ymStr){
     var esVentas=areaDe(a)==='Ventas';
     var mp=metasMes[a.nombre]||{palta:'',pitahaya:''};
     var metaCells=(ymStr&&esVentas)
-      ?('<td><input type="number" step="0.01" class="metaPersonal metaPalta" data-nombre="'+a.nombre+'" value="'+(mp.palta||'')+'" style="width:80px" placeholder="m²"></td>'
-        +'<td><input type="number" step="0.01" class="metaPersonal metaPitahaya" data-nombre="'+a.nombre+'" value="'+(mp.pitahaya||'')+'" style="width:80px" placeholder="m²"></td>')
+      ?('<td><input type="number" step="0.01" class="metaPersonal metaPalta" data-nombre="'+esc(a.nombre)+'" value="'+(mp.palta||'')+'" style="width:80px" placeholder="m²"></td>'
+        +'<td><input type="number" step="0.01" class="metaPersonal metaPitahaya" data-nombre="'+esc(a.nombre)+'" value="'+(mp.pitahaya||'')+'" style="width:80px" placeholder="m²"></td>')
       :(ymStr?'<td class="note" style="text-align:center">—</td><td class="note" style="text-align:center">—</td>':'');
-    return '<tr><td><input class="obs asName" data-id="'+a.id+'" value="'+a.nombre.replace(/"/g,'&quot;')+'"></td>'
+    return '<tr><td><input class="obs asName" data-id="'+a.id+'" value="'+esc(a.nombre)+'"></td>'
       +'<td><select class="asArea" data-id="'+a.id+'">'+areaSelOpts.replace('value="'+areaDe(a)+'"','value="'+areaDe(a)+'" selected')+'</select></td>'
       +'<td><input type="date" class="date asDesde" data-id="'+a.id+'" value="'+(a.fecha_inicio||'')+'"></td>'
       +'<td><input type="date" class="date asHasta" data-id="'+a.id+'" value="'+(a.fecha_fin||'')+'" title="Vacío = sigue en la empresa"></td>'+metaCells+'</tr>';
@@ -809,7 +817,7 @@ function renderVentas(){
     +'<div class="bar"><div class="name">Palta</div><div class="track"><div class="fill" style="width:'+avPalta.toFixed(1)+'%;background:#a3e635"></div></div><div class="val">'+nf(m2Palta)+' de '+nf(metaTotPalta)+' m² · '+avPalta.toFixed(0)+'%</div></div>'
     +'<div class="bar"><div class="name">Pitahaya</div><div class="track"><div class="fill" style="width:'+avPita.toFixed(1)+'%;background:#f472b6"></div></div><div class="val">'+nf(m2Pitahaya)+' de '+nf(metaTotPitahaya)+' m² · '+avPita.toFixed(0)+'%</div></div>'
     +'</div>';
-  var rankHtml=rank.map(function(r,i){var pct=t.ingS?r.v/t.ingS*100:0;return '<div class="bar"><div class="name" style="width:220px">'+(i+1)+'. '+r.a+'</div><div class="track"><div class="fill" style="width:'+(r.v/maxR*100).toFixed(1)+'%;background:#fbbf24"></div></div><div class="val">'+S(r.v)+' · '+pct.toFixed(1)+'% · '+nf(r.m2)+' m²</div></div>';}).join('');
+  var rankHtml=rank.map(function(r,i){var pct=t.ingS?r.v/t.ingS*100:0;return '<div class="bar"><div class="name" style="width:220px">'+(i+1)+'. '+esc(r.a)+'</div><div class="track"><div class="fill" style="width:'+(r.v/maxR*100).toFixed(1)+'%;background:#fbbf24"></div></div><div class="val">'+S(r.v)+' · '+pct.toFixed(1)+'% · '+nf(r.m2)+' m²</div></div>';}).join('');
   var rankCard='<div class="card"><h3>Ventas por asesor <span class="m">· % del total y m² vendidos</span></h3>'+rankHtml+'</div>';
   var byConcepto={};movs.forEach(function(m){if(m.moneda!=='USD'){var k=m.concepto||'Sin clasificar';byConcepto[k]=(byConcepto[k]||0)+m.abono;}});
   var conceptoRows=CONCEPTOS_VENTAS.concat(byConcepto['Sin clasificar']?['Sin clasificar']:[]).map(function(c){var v=byConcepto[c]||0;var pct=t.ingS?v/t.ingS*100:0;return '<div class="bar"><div class="name" style="width:220px">'+c+'</div><div class="track"><div class="fill" style="width:'+pct.toFixed(1)+'%;background:#38bdf8"></div></div><div class="val">'+S(v)+' · '+pct.toFixed(1)+'%</div></div>';}).join('');
@@ -822,11 +830,11 @@ function renderVentas(){
       var cSel='<select class="conceptosel" data-sig="'+sigEnc+'"'+dis+'>'+conceptoOptsVentas(m.concepto)+'</select>';
       var pSel='<select class="proyectosel" data-sig="'+sigEnc+'"'+dis+'>'+proyectoOpts(m.proyecto)+'</select>';
       var delBtn=READONLY?'':'<td><button class="ghost delBtn" data-sig="'+sigEnc+'" title="Eliminar">🗑</button></td>';
-      return '<tr><td>'+dmy(m.fecha)+'</td><td><input class="obs cliente" data-sig="'+sigEnc+'" value="'+(m.cliente||'').replace(/"/g,'&quot;')+'" placeholder="Nombre cliente"'+dis+'></td>'
-        +'<td><input class="obs lote" data-sig="'+sigEnc+'" value="'+(m.lote||'').replace(/"/g,'&quot;')+'" placeholder="ej. D-21" style="width:80px"'+dis+'></td>'
+      return '<tr><td>'+dmy(m.fecha)+'</td><td><input class="obs cliente" data-sig="'+sigEnc+'" value="'+esc((m.cliente||''))+'" placeholder="Nombre cliente"'+dis+'></td>'
+        +'<td><input class="obs lote" data-sig="'+sigEnc+'" value="'+esc((m.lote||''))+'" placeholder="ej. D-21" style="width:80px"'+dis+'></td>'
         +'<td>'+pSel+'</td>'
         +'<td class="num"><input class="obs m2" data-sig="'+sigEnc+'" type="number" step="0.01" value="'+(m.m2||'')+'" style="width:80px;text-align:right"'+dis+'></td>'
-        +'<td>'+cSel+'</td><td class="num m-ing">'+fmtMon(m)+'</td><td>'+aSel+'</td><td><input class="obs obsonly" data-sig="'+sigEnc+'" value="'+(m.obs||'').replace(/"/g,'&quot;')+'" placeholder="—"'+dis+'></td>'+delBtn+'</tr>';
+        +'<td>'+cSel+'</td><td class="num m-ing">'+fmtMon(m)+'</td><td>'+aSel+'</td><td><input class="obs obsonly" data-sig="'+sigEnc+'" value="'+esc((m.obs||''))+'" placeholder="—"'+dis+'></td>'+delBtn+'</tr>';
     }).join('')+'</tbody></table></div></div>';
   box.innerHTML=mgmtToggle+mgmt+kpis+metaCard+proyectoCard+rankCard+conceptoCard+det;
   wireVentasPersonalToggle();
@@ -847,11 +855,11 @@ function cobranzaFilaHtml(m,bodyId){var sig=sigOf(m);var sigEnc=encodeURICompone
   var cSel='<select class="conceptosel" data-sig="'+sigEnc+'"'+dis+'>'+conceptoOpts(m.concepto)+'</select>';
   var mSel='<select class="metodopagosel" data-sig="'+sigEnc+'"'+dis+'>'+metodoPagoOpts(m.metodoPago)+'</select>';
   var delBtn=READONLY?'':'<td><button class="ghost delBtn" data-sig="'+sigEnc+'" title="Eliminar">🗑</button></td>';
-  return '<tr><td>'+dmy(m.fecha)+'</td><td>'+(m.numOp||'—')+'</td><td>'+m.desc+'</td>'
-    +'<td><input class="obs cliente" data-sig="'+sigEnc+'" value="'+(m.cliente||'').replace(/"/g,'&quot;')+'" placeholder="Nombre cliente"'+dis+'></td>'
+  return '<tr><td>'+dmy(m.fecha)+'</td><td>'+esc(m.numOp||'—')+'</td><td>'+esc(m.desc)+'</td>'
+    +'<td><input class="obs cliente" data-sig="'+sigEnc+'" value="'+esc((m.cliente||''))+'" placeholder="Nombre cliente"'+dis+'></td>'
     +'<td>'+cSel+'</td>'
-    +'<td><input class="obs cuota" data-sig="'+sigEnc+'" value="'+(m.cuota||'').replace(/"/g,'&quot;')+'" placeholder="ej. Financiamiento 8" style="width:130px"'+dis+'></td>'
-    +'<td>'+mSel+'</td><td class="num m-ing">'+fmtMon(m)+'</td><td>'+aSel+'</td><td><input class="obs obsonly" data-sig="'+sigEnc+'" value="'+(m.obs||'').replace(/"/g,'&quot;')+'" placeholder="ej. cobró a cliente Pérez"'+dis+'></td>'+delBtn+'</tr>';
+    +'<td><input class="obs cuota" data-sig="'+sigEnc+'" value="'+esc((m.cuota||''))+'" placeholder="ej. Financiamiento 8" style="width:130px"'+dis+'></td>'
+    +'<td>'+mSel+'</td><td class="num m-ing">'+fmtMon(m)+'</td><td>'+aSel+'</td><td><input class="obs obsonly" data-sig="'+sigEnc+'" value="'+esc((m.obs||''))+'" placeholder="ej. cobró a cliente Pérez"'+dis+'></td>'+delBtn+'</tr>';
 }
 function renderCobranza(){
   var ymStr=document.getElementById('selMesC').value;
@@ -882,7 +890,7 @@ function renderCobranza(){
       +'<div class="kpi"><div class="l">Operaciones</div><div class="v">'+fin.length+'</div><div class="x">&nbsp;</div></div></div>'
       +'<div class="tablescroll"><table><thead><tr><th>Fecha</th><th>N° operación</th><th>Detalle (estado de cuenta)</th><th class="num">Monto</th><th>Observación</th>'+(READONLY?'':'<th></th>')+'</tr></thead><tbody id="financDetBody">'
       +fin.map(function(m){var sig=sigOf(m);var sigEnc=encodeURIComponent(sig);var dis=READONLY?' disabled':'';var delBtn=READONLY?'':'<td><button class="ghost delBtn" data-sig="'+sigEnc+'" title="Eliminar">🗑</button></td>';
-        return '<tr><td>'+dmy(m.fecha)+'</td><td>'+(m.numOp||'—')+'</td><td>'+m.desc+'</td><td class="num m-ing">'+fmtMon(m)+'</td><td><input class="obs" data-sig="'+sigEnc+'" value="'+(m.obs||'').replace(/"/g,'&quot;')+'" placeholder="ej. préstamo de socio Juan Pérez"'+dis+'></td>'+delBtn+'</tr>';
+        return '<tr><td>'+dmy(m.fecha)+'</td><td>'+esc(m.numOp||'—')+'</td><td>'+esc(m.desc)+'</td><td class="num m-ing">'+fmtMon(m)+'</td><td><input class="obs" data-sig="'+sigEnc+'" value="'+esc((m.obs||''))+'" placeholder="ej. préstamo de socio Juan Pérez"'+dis+'></td>'+delBtn+'</tr>';
       }).join('')+'</tbody></table></div></div>';
     html+=detFin;
   }
@@ -969,14 +977,14 @@ function groupedBarChart(title,sub,cats,getA,getB,colorA,colorB,labelA,labelB){
   cats.forEach(function(c,idx){var x0=pl+idx*gw;var a=getA(c),b=getB(c);var ah=a/maxV*ih,bh=b/maxV*ih;var wx=Math.min(gw*0.34,40);
     svg+='<rect x="'+(x0+gw*0.5-wx-2).toFixed(1)+'" y="'+(pt+ih-ah).toFixed(1)+'" width="'+wx.toFixed(1)+'" height="'+ah.toFixed(1)+'" rx="3" fill="'+colorA+'"/>';
     svg+='<rect x="'+(x0+gw*0.5+2).toFixed(1)+'" y="'+(pt+ih-bh).toFixed(1)+'" width="'+wx.toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="3" fill="'+colorB+'"/>';
-    svg+='<text x="'+(x0+gw*0.5).toFixed(1)+'" y="'+(H-pb+16)+'" text-anchor="middle" style="font-size:9px">'+c.slice(0,10)+'</text>';});
+    svg+='<text x="'+(x0+gw*0.5).toFixed(1)+'" y="'+(H-pb+16)+'" text-anchor="middle" style="font-size:9px">'+esc(c.slice(0,10))+'</text>';});
   return '<div class="card"><h3>'+title+' <span class="m">'+sub+'</span></h3><svg viewBox="0 0 '+W+' '+H+'" width="100%">'+svg+'</svg><div class="legend"><span><b style="background:'+colorA+'"></b>'+labelA+'</span><span><b style="background:'+colorB+'"></b>'+labelB+'</span></div></div>';
 }
 function rentabilidadRankHtml(rows){
   var maxAbs=Math.max.apply(null,rows.map(function(r){return Math.abs(r.rentabilidad);}).concat([1]));
   return rows.slice().sort(function(a,b){return b.rentabilidad-a.rentabilidad;}).map(function(r,i){
     var w=Math.abs(r.rentabilidad)/maxAbs*100;var color=r.rentabilidad>=0?'#22c55e':'#f87171';
-    return '<div class="bar"><div class="name" style="width:180px">'+(i+1)+'. '+r.asesor+'</div><div class="track"><div class="fill" style="width:'+w.toFixed(1)+'%;background:'+color+'"></div></div><div class="val" style="color:'+color+'">'+S(r.rentabilidad)+'</div></div>';
+    return '<div class="bar"><div class="name" style="width:180px">'+(i+1)+'. '+esc(r.asesor)+'</div><div class="track"><div class="fill" style="width:'+w.toFixed(1)+'%;background:'+color+'"></div></div><div class="val" style="color:'+color+'">'+S(r.rentabilidad)+'</div></div>';
   }).join('');
 }
 var CAC_MOSTRAR_PERSONAL=false;
@@ -1029,7 +1037,7 @@ function renderCAC(){
     +'<tr><td>Marketing por asesor</td><td class="num"><b>'+S(d.mktPorAsesor)+'</b> ( '+S(d.mktTotal)+' ÷ '+d.nAsesores+' )</td></tr>'
     +'</tbody></table><p class="note" style="margin-top:8px">Los montos en dólares se convierten a soles con el tipo de cambio de cada movimiento, para que todo el cálculo quede en un solo número.</p></div>';
   function pctSubCel(v,ingreso){var p=ingreso?v/ingreso*100:0;return '<td class="num">'+S(v)+(ingreso?'<div style="font-size:10px;color:var(--muted)">'+p.toFixed(1)+'%</div>':'')+'</td>';}
-  var filasCac=d.rows.map(function(r){return '<tr><td><b>'+r.asesor+'</b></td><td class="num">'+S(r.ingreso)+'</td>'+pctSubCel(r.costoVentas,r.ingreso)+pctSubCel(r.mkt,r.ingreso)+pctSubCel(r.fijos,r.ingreso)+'<td class="num"><b>'+S(r.cacTotal)+'</b></td><td class="num">'+(r.ingreso?r.pctCac.toFixed(1)+'%':'—')+'</td><td><span class="status '+CLAS_CAC_CSS[r.clas]+'">'+CLAS_CAC_LABEL[r.clas]+'</span></td></tr>';}).join('');
+  var filasCac=d.rows.map(function(r){return '<tr><td><b>'+esc(r.asesor)+'</b></td><td class="num">'+S(r.ingreso)+'</td>'+pctSubCel(r.costoVentas,r.ingreso)+pctSubCel(r.mkt,r.ingreso)+pctSubCel(r.fijos,r.ingreso)+'<td class="num"><b>'+S(r.cacTotal)+'</b></td><td class="num">'+(r.ingreso?r.pctCac.toFixed(1)+'%':'—')+'</td><td><span class="status '+CLAS_CAC_CSS[r.clas]+'">'+CLAS_CAC_LABEL[r.clas]+'</span></td></tr>';}).join('');
   var tablaCac='<div class="card"><h3>CAC por asesor <span class="m">· costo de adquisición · % chiquito = % del ingreso de ese asesor</span></h3><div class="tablescroll"><table><thead><tr><th>Asesor</th><th class="num">Ingreso</th><th class="num">Costo ventas</th><th class="num">Asig. mkt</th><th class="num">Asig. fijos</th><th class="num">CAC total</th><th class="num">% CAC</th><th>Clasificación</th></tr></thead><tbody>'+filasCac+'</tbody></table></div></div>';
   var chartCac=groupedBarChart('Ingreso vs CAC total por asesor','',d.rows.map(function(r){return r.asesor;}),
     function(n){var r=d.rows.filter(function(x){return x.asesor===n;})[0];return r.ingreso;},
@@ -1043,7 +1051,7 @@ function renderCAC(){
     +'<div class="kpi"><div class="l">% rentabilidad promedio</div><div class="v">'+pctRentEquipo.toFixed(1)+'%</div><div class="x">&nbsp;</div></div>'
   +'</div>';
   var filasRpa=d.rows.map(function(r){var pctR=r.ingreso?r.rentabilidad/r.ingreso*100:0;
-    return '<tr><td><b>'+r.asesor+'</b></td><td class="num">'+S(r.ingreso)+'</td><td class="num">'+S(r.cacTotal)+'</td><td class="num" style="color:'+(r.rentabilidad>=0?'var(--green)':'var(--red)')+'">'+S(r.rentabilidad)+'</td><td class="num">'+(r.ingreso?pctR.toFixed(1)+'%':'—')+'</td><td class="num">'+(r.cacTotal?'1 : '+r.ratioRPA.toFixed(1):'—')+'</td><td><span class="status '+RATIO_RPA_CSS[r.ratioClas]+'">'+RATIO_RPA_LABEL[r.ratioClas]+'</span></td></tr>';}).join('');
+    return '<tr><td><b>'+esc(r.asesor)+'</b></td><td class="num">'+S(r.ingreso)+'</td><td class="num">'+S(r.cacTotal)+'</td><td class="num" style="color:'+(r.rentabilidad>=0?'var(--green)':'var(--red)')+'">'+S(r.rentabilidad)+'</td><td class="num">'+(r.ingreso?pctR.toFixed(1)+'%':'—')+'</td><td class="num">'+(r.cacTotal?'1 : '+r.ratioRPA.toFixed(1):'—')+'</td><td><span class="status '+RATIO_RPA_CSS[r.ratioClas]+'">'+RATIO_RPA_LABEL[r.ratioClas]+'</span></td></tr>';}).join('');
   var tablaRpa='<div class="card"><h3>Rentabilidad por asesor <span class="m">· Ingreso − CAC total, y tasa sana (Ventas ÷ Costo)</span></h3><div class="tablescroll"><table><thead><tr><th>Asesor</th><th class="num">Ingreso</th><th class="num">CAC total</th><th class="num">Rentabilidad</th><th class="num">% Rentabilidad</th><th class="num">Ratio RPA</th><th>Tasa sana</th></tr></thead><tbody>'+filasRpa+'</tbody></table></div></div>';
   var rankRpa='<div class="card"><h3>Ranking de rentabilidad <span class="m">· verde = positivo, rojo = negativo</span></h3>'+rentabilidadRankHtml(d.rows)+'</div>';
   var seccionRpa='<h3 style="margin:26px 0 10px">💹 RPA — rentabilidad por asesor y equipo</h3>'+kpisRpa+tablaRpa+rankRpa;
@@ -1099,10 +1107,10 @@ function renderFijos(){
     +'<tr style="font-weight:700"><td>TOTAL</td><td class="num">'+S(T.s)+'</td><td class="num">'+U(T.u)+'</td><td class="num">100%</td><td></td></tr></tbody></table></div>'
     +'<p class="note" style="margin-top:8px">Soles y dólares por separado. El % suma los dólares al TC del mes. Evolution es una entidad aparte: su parte no entra en el 100% de las áreas de Grupo Robles.</p></div>';
   var head='<tr><th>Fecha</th><th>Gasto</th><th class="num">Monto</th><th>Reparto</th>'+AREAS_REPARTO.map(function(a){return '<th class="num">'+(a==='EVOLUTION'?'Evolution':areaLabel(a))+'</th>';}).join('')+(READONLY?'':'<th></th>')+'</tr>';
-  var body=fijos.map(function(m){var sigEnc=encodeURIComponent(sigOf(m));var l=areasReparto(m);var parte=m.cargo/l.length;var mon=m.moneda==='USD'?U:S;
+  var body=fijos.map(function(m){var sigEnc=encodeURIComponent(sigOf(m));var l=areasReparto(m);var partes={};repartir(m,m.cargo,function(a,v){partes[a]=v;});var mon=m.moneda==='USD'?U:S;
     var repCell=READONLY?'<span class="note">÷ '+esc(repartoTxt(m))+'</span>':'<button class="ghost repBtn" data-sig="'+sigEnc+'" style="font-size:11px;padding:3px 8px;white-space:nowrap">÷ '+esc(repartoTxt(m))+'</button>';
     return '<tr><td>'+dmy(m.fecha)+'</td><td>'+esc(m.desc||m.mov)+(m.obs?'<div class="note">'+esc(m.obs)+'</div>':'')+'</td><td class="num m-egr">'+fmtMon(m)+'</td><td>'+repCell+'</td>'
-      +AREAS_REPARTO.map(function(a){return '<td class="num">'+(l.indexOf(a)!==-1?mon(parte):'<span class="note">—</span>')+'</td>';}).join('')
+      +AREAS_REPARTO.map(function(a){return '<td class="num">'+(partes[a]!=null?mon(partes[a]):'<span class="note">—</span>')+'</td>';}).join('')
       +(READONLY?'':'<td><label class="note" style="white-space:nowrap"><input type="checkbox" class="fijoOff" data-sig="'+sigEnc+'" checked> Fijo</label></td>')+'</tr>';}).join('');
   var totRow='<tr style="font-weight:700"><td colspan="4">TOTAL POR ÁREA</td>'+AREAS_REPARTO.map(function(a){return '<td class="num">'+SU(x.by[a].s,x.by[a].u)+'</td>';}).join('')+(READONLY?'':'<td></td>')+'</tr>';
   var matriz='<div class="card"><h3>Detalle por gasto <span class="m">· cómo se reparte cada costo fijo · toca el botón ÷ para elegir las áreas</span></h3><div class="tablescroll"><table><thead>'+head+'</thead><tbody>'+body+totRow+'</tbody></table></div></div>';
@@ -1157,7 +1165,7 @@ function renderConsolCAC(){
   var pBody=alist.map(function(a){
     var cells=present.map(function(mn){var r=byMonth[mn].rows.filter(function(x){return x.asesor===a;})[0];var v=r?r.rentabilidad:0;
       return '<td class="num" style="color:'+(v>=0?'var(--green)':'var(--red)')+'">'+S(v)+'</td>';}).join('');
-    return '<tr><td><b>'+a+'</b></td>'+cells+'<td class="num"><b>'+S(byAsesor[a].rent)+'</b></td></tr>';}).join('');
+    return '<tr><td><b>'+esc(a)+'</b></td>'+cells+'<td class="num"><b>'+S(byAsesor[a].rent)+'</b></td></tr>';}).join('');
   var pivotCard=alist.length?('<div class="card"><h3>Rentabilidad por asesor y mes</h3><div style="overflow-x:auto"><table><thead>'+pTh+'</thead><tbody>'+pBody+'</tbody></table></div></div>'):'';
   box.innerHTML=kpis+chart+rankCard+pivotCard;
 }
@@ -1175,7 +1183,7 @@ function rankPorAsesor(movs,withM2){
   var by={};movs.forEach(function(m){var k=m.asesor||'Sin asignar';by[k]=by[k]||{s:0,m2:0,n:0};by[k].s+=montoPEN(m,false);by[k].m2+=(+m.m2||0);by[k].n++;});
   var rank=Object.keys(by).map(function(k){return {a:k,v:by[k].s,m2:by[k].m2,n:by[k].n};}).sort(function(x,y){return y.v-x.v;});
   var tot=rank.reduce(function(s,r){return s+r.v;},0)||1;var maxR=rank.length?Math.max.apply(null,rank.map(function(r){return r.v;})):1;
-  var html=rank.map(function(r,i){var pct=r.v/tot*100;return '<div class="bar"><div class="name" style="width:220px">'+(i+1)+'. '+r.a+'</div><div class="track"><div class="fill" style="width:'+(r.v/maxR*100).toFixed(1)+'%;background:#fbbf24"></div></div><div class="val">'+S(r.v)+' · '+pct.toFixed(1)+'%'+(withM2?' · '+nf(r.m2)+' m²':'')+' · '+r.n+' ops</div></div>';}).join('');
+  var html=rank.map(function(r,i){var pct=r.v/tot*100;return '<div class="bar"><div class="name" style="width:220px">'+(i+1)+'. '+esc(r.a)+'</div><div class="track"><div class="fill" style="width:'+(r.v/maxR*100).toFixed(1)+'%;background:#fbbf24"></div></div><div class="val">'+S(r.v)+' · '+pct.toFixed(1)+'%'+(withM2?' · '+nf(r.m2)+' m²':'')+' · '+r.n+' ops</div></div>';}).join('');
   return rank.length?html:'<div class="empty">Sin datos.</div>';
 }
 function pivotPorAsesorMes(movs,present){
@@ -1185,7 +1193,7 @@ function pivotPorAsesorMes(movs,present){
   var grand=alist.reduce(function(s,a){return s+asTot[a];},0)||1;
   function cel(v,p){return v?'<td class="num"><div>'+S(v)+'</div><div style="font-size:10px;color:var(--muted)">'+p.toFixed(1)+'%</div></td>':'<td class="num" style="color:var(--muted)">—</td>';}
   var th='<tr><th>Asesor</th>'+present.map(function(mn){return '<th class="num">'+MESES[mn-1].slice(0,3)+'</th>';}).join('')+'<th class="num">Total</th></tr>';
-  var body=alist.map(function(a){return '<tr><td><b>'+a+'</b></td>'+present.map(function(mn){var v=(byAM[a][mn]||0);return cel(v,monTot[mn]?v/monTot[mn]*100:0);}).join('')+cel(asTot[a],asTot[a]/grand*100)+'</tr>';}).join('');
+  var body=alist.map(function(a){return '<tr><td><b>'+esc(a)+'</b></td>'+present.map(function(mn){var v=(byAM[a][mn]||0);return cel(v,monTot[mn]?v/monTot[mn]*100:0);}).join('')+cel(asTot[a],asTot[a]/grand*100)+'</tr>';}).join('');
   var foot='<tr style="font-weight:700"><td>TOTAL</td>'+present.map(function(mn){return '<td class="num">'+S(monTot[mn])+'</td>';}).join('')+'<td class="num">'+S(grand)+'</td></tr>';
   return alist.length?('<div class="card"><h3>Consolidado por asesor y mes <span class="m">· '+NOTA_USD+'</span></h3><div style="overflow-x:auto"><table><thead>'+th+'</thead><tbody>'+body+foot+'</tbody></table></div></div>'):'';
 }
@@ -1276,7 +1284,7 @@ function trendChart(areas,present,byMonthDist){
     svg+='<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2"/>';
     present.forEach(function(mn,idx){var row=byMonthDist[mn].rows.filter(function(r){return r.area===a;})[0];var v=row?row.pct:0;var rc=row?row.recom:(RECOM[a]||0);var x=pl+idx*gw;var y=pt+ih-Math.min(v/maxPct,1)*ih;
       var tip=areaLabel(a)+' · '+MESES[mn-1]+': '+v.toFixed(1)+'% (recomendado '+rc.toFixed(1)+'%)';
-      svg+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="7" fill="'+color+'" class="tipPt" data-tip="'+tip.replace(/"/g,'&quot;')+'" style="cursor:pointer"></circle>';});
+      svg+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="7" fill="'+color+'" class="tipPt" data-tip="'+esc(tip)+'" style="cursor:pointer"></circle>';});
     var recom=RECOM[a];
     if(recom!=null){var yr=pt+ih-Math.min(recom/maxPct,1)*ih;svg+='<line x1="'+pl+'" y1="'+yr.toFixed(1)+'" x2="'+(pl+iw)+'" y2="'+yr.toFixed(1)+'" stroke="'+color+'" stroke-width="1" stroke-dasharray="4,3" opacity="0.6"/>';}
   });
@@ -1353,11 +1361,11 @@ function exportar(scope){
   var dn=distNucleo(head);dn.rows.forEach(function(d){A.push([areaLabel(d.area),r2(d.gastado),r2(d.gastadoU),r2(d.fijo),r2(d.fijoU),d.pct.toFixed(1)+'%',d.recom+'%',statusTxt(d.status)]);});
   A.push(['TOTAL NÚCLEO',r2(dn.tot),r2(dn.totU),r2(dn.totFijo),r2(dn.totFijoU),'100%','100%','']);A.push([]);A.push(['SEGUIMIENTO (FUERA DEL 100%)']);A.push(['Área','Gastado S/','Gastado US$','% s/ Egreso','# Ops']);
   distSeg(head).forEach(function(d){A.push([areaLabel(d.area),r2(d.gastado),r2(d.gastadoU),d.pct.toFixed(1)+'%',d.ops]);});
-  A.push([]);A.push([]);A.push(['CONSOLIDADO '+anio+' (resumen)']);A.push(['Mes','Ingresos S/','Egresos S/','Resultado S/','% que queda']);
-  var mm={};for(var i=1;i<=12;i++)mm[i]={ing:0,egr:0};
-  allMovs().filter(function(m){return m.fecha.slice(0,4)===anio&&m.moneda!=='USD';}).forEach(function(m){var n=+m.fecha.slice(5,7);if(m.abono>0)mm[n].ing+=m.abono;else mm[n].egr+=m.cargo;});
-  var tI=0,tE=0;for(var i=1;i<=12;i++){if(mm[i].ing||mm[i].egr){A.push([MESES[i-1],r2(mm[i].ing),r2(mm[i].egr),r2(mm[i].ing-mm[i].egr),pctQueda(mm[i].ing,mm[i].egr).toFixed(1)+'%']);tI+=mm[i].ing;tE+=mm[i].egr;}}
-  A.push(['TOTAL',r2(tI),r2(tE),r2(tI-tE),pctQueda(tI,tE).toFixed(1)+'%']);
+  A.push([]);A.push([]);A.push(['CONSOLIDADO '+anio+' (resumen)']);A.push(['Mes','Ingresos S/','Egresos S/','Resultado S/','% que queda','Ingresos US$','Egresos US$']);
+  var mm={};for(var i=1;i<=12;i++)mm[i]={ing:0,egr:0,ingU:0,egrU:0};
+  allMovs().filter(function(m){return m.fecha.slice(0,4)===anio;}).forEach(function(m){var n=+m.fecha.slice(5,7);var u=m.moneda==='USD';if(m.abono>0){if(u)mm[n].ingU+=m.abono;else mm[n].ing+=m.abono;}else{if(u)mm[n].egrU+=m.cargo;else mm[n].egr+=m.cargo;}});
+  var tI=0,tE=0,tIU=0,tEU=0;for(var i=1;i<=12;i++){if(mm[i].ing||mm[i].egr||mm[i].ingU||mm[i].egrU){A.push([MESES[i-1],r2(mm[i].ing),r2(mm[i].egr),r2(mm[i].ing-mm[i].egr),pctQueda(mm[i].ing,mm[i].egr).toFixed(1)+'%',r2(mm[i].ingU),r2(mm[i].egrU)]);tI+=mm[i].ing;tE+=mm[i].egr;tIU+=mm[i].ingU;tEU+=mm[i].egrU;}}
+  A.push(['TOTAL',r2(tI),r2(tE),r2(tI-tE),pctQueda(tI,tE).toFixed(1)+'%',r2(tIU),r2(tEU)]);
   var ws=XLSX.utils.aoa_to_sheet(A);ws['!cols']=[{wch:34},{wch:15},{wch:15},{wch:15},{wch:15},{wch:12},{wch:14},{wch:10}];
   var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'FLUJO DE CAJA');
   var det=(mesMovs?mesMovs:movs).map(function(m){var ing=esIngreso(m);return {Fecha:dmy(m.fecha),'N° operación':m.numOp||'',Movimiento:m.mov,'Descripción':m.desc,Moneda:m.moneda,Cargo:m.cargo||'',Abono:m.abono||'','TC':getTC(ym(m.fecha)),Tipo:ing?'Ingreso':'Egreso','Área':areaLabel(m.area),
@@ -1404,7 +1412,7 @@ function showLogin(){document.getElementById('login').style.display='grid';docum
 function aplicarRol(){
   READONLY = (ROL!=='editor');
   document.getElementById('navCargar').style.display = READONLY?'none':'';
-  document.getElementById('uinfo').innerHTML = (USUARIO?USUARIO.email:'') + ' <span class="rolbadge '+(READONLY?'rol-viewer':'rol-editor')+'">'+(READONLY?'Solo ver':'Editor')+'</span>';
+  document.getElementById('uinfo').innerHTML = esc(USUARIO?USUARIO.email:'') + ' <span class="rolbadge '+(READONLY?'rol-viewer':'rol-editor')+'">'+(READONLY?'Solo ver':'Editor')+'</span>';
   if(READONLY){ // arrancar en Mes
     Array.prototype.forEach.call(document.querySelectorAll('nav button'),function(x){x.classList.remove('on');});
     document.querySelector('nav button[data-v="mes"]').classList.add('on');
