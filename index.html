@@ -24,7 +24,7 @@
     display:grid;place-items:center;font-size:22px;box-shadow:var(--shadow)}
   h1{font-size:19px;margin:0}
   .sub{color:var(--muted);font-size:12.5px;margin:2px 0 0}
-  nav{margin-left:auto;display:flex;gap:6px;background:var(--panel);padding:5px;border-radius:12px;border:1px solid var(--line)}
+  nav{margin-left:auto;display:flex;flex-wrap:wrap;max-width:100%;gap:6px;background:var(--panel);padding:5px;border-radius:12px;border:1px solid var(--line)}
   nav button{background:transparent;border:0;color:var(--muted);padding:9px 16px;border-radius:9px;cursor:pointer;font-size:13.5px;font-weight:600}
   nav button.on{background:var(--accent);color:#fff}
   .userchip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;font-size:12.5px;color:var(--muted)}
@@ -146,6 +146,7 @@
       <button data-v="ventas">Ventas</button>
       <button data-v="cobranza">Cobranza</button>
       <button data-v="cac">CAC / RPA</button>
+      <button data-v="fijos">Costos fijos</button>
       <button data-v="consol">Consolidado</button>
     </nav>
   </header>
@@ -225,6 +226,17 @@
     <div id="cacBody"></div>
   </section>
 
+  <!-- COSTOS FIJOS -->
+  <section class="view" id="v-fijos">
+    <div class="filterbar">
+      <label class="note">Mes:</label><select id="selMesF"></select>
+      <label class="note">Desde:</label><input type="date" class="date" id="fDesde">
+      <label class="note">Hasta:</label><input type="date" class="date" id="fHasta">
+      <button class="ghost" id="fReset">Limpiar días</button>
+    </div>
+    <div id="fijosBody"></div>
+  </section>
+
   <!-- CONSOLIDADO -->
   <section class="view" id="v-consol">
     <div class="filterbar">
@@ -260,13 +272,13 @@ var HAS_REPARTO=false, HAS_TC=false;
 var TC={1:3.47,2:3.47,3:3.47,4:3.45,5:3.42,6:3.40,7:3.42,8:3.47,9:3.47,10:3.47,11:3.47,12:3.47};
 var MESES=['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SETIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
 var NUCLEO=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'];
-var SEG=['BANCO','DVO','OTROS'];
+var SEG=['BANCO','DVO','OTROS','EVOLUTION'];
 var RECOM={'DEUDA GG':50,'OPE Planta':7,'OPE Infra':20,'OPE Comex':3,'VENTAS':5,'MKT':5,'ADM':10};
-var AREAS=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM','BANCO','DVO','OTROS','INGRESO','REVISAR'];
+var AREAS=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM','BANCO','DVO','OTROS','EVOLUTION','INGRESO','REVISAR'];
 // 'DEUDA GG' es la clave guardada en la BD; en pantalla se muestra con su nombre nuevo
-var AREA_LABEL={'DEUDA GG':'CAPITALIZACIÓN DIRECCIÓN','BANCO':'Banco (ITF)','DVO':'Diferencia de cambio','OTROS':'Otros'};
+var AREA_LABEL={'DEUDA GG':'CAPITALIZACIÓN DIRECCIÓN','EVOLUTION':'Evolution (entidad aparte)','BANCO':'Banco (ITF)','DVO':'Diferencia de cambio','OTROS':'Otros'};
 function areaLabel(a){return AREA_LABEL[a]||a;}
-var AREA_COLOR={'DEUDA GG':'#f87171','OPE Planta':'#34d399','OPE Infra':'#22d3ee','OPE Comex':'#a78bfa','VENTAS':'#fbbf24','MKT':'#f472b6','ADM':'#60a5fa','BANCO':'#94a3b8','DVO':'#c084fc','OTROS':'#64748b','INGRESO':'#22c55e','REVISAR':'#f87171'};
+var AREA_COLOR={'DEUDA GG':'#f87171','OPE Planta':'#34d399','OPE Infra':'#22d3ee','OPE Comex':'#a78bfa','VENTAS':'#fbbf24','MKT':'#f472b6','ADM':'#60a5fa','BANCO':'#94a3b8','DVO':'#c084fc','OTROS':'#64748b','EVOLUTION':'#fb923c','INGRESO':'#22c55e','REVISAR':'#f87171'};
 // Clasificación de ingresos, INDEPENDIENTE del Área (que solo clasifica egresos del núcleo/seguimiento)
 var CLAS_LABEL={'':'—','VENTAS':'Ventas','COBRANZA':'Cobranza','FINANCIAMIENTO':'Financiamiento (préstamo/socios)'};
 function clasLabel(c){return CLAS_LABEL[c||'']||c;}
@@ -277,14 +289,15 @@ var REGLAS=[['ITF','BANCO'],['N/D I-BANC','BANCO'],['N/D MEGA','BANCO'],['N/D AU
 // Tipo de cambio del mes: el guardado en la nube manda; si no hay, el valor por defecto de TC
 function getTC(ymStr){var s=DB.saldos[ymStr];if(s&&s.tc)return s.tc;return TC[+ymStr.slice(5,7)]||3.47;}
 // Costos fijos: se reparten en partes iguales entre las áreas principales (sin CAPITALIZACIÓN DIRECCIÓN = 'DEUDA GG')
-var AREAS_REPARTO=NUCLEO.filter(function(a){return a!=='DEUDA GG';});
+// y Evolution, que es una entidad aparte pero usa la oficina (su parte queda fuera del núcleo 100%)
+var AREAS_REPARTO=NUCLEO.filter(function(a){return a!=='DEUDA GG';}).concat(['EVOLUTION']);
 function areasReparto(m){
   if(!m.esFijo)return [m.area];
   var l=(m.reparto||'').split(',').filter(function(a){return AREAS_REPARTO.indexOf(a)!==-1;});
   return l.length?l:AREAS_REPARTO.slice();
 }
 function repartir(m,monto,fn){var l=areasReparto(m);var p=monto/l.length;l.forEach(function(a){fn(a,p);});}
-function repartoTxt(m){var l=areasReparto(m);return l.length===AREAS_REPARTO.length?'Todas ('+l.length+')':l.join(', ');}
+function repartoTxt(m){var l=areasReparto(m);return l.length===AREAS_REPARTO.length?'Todas ('+l.length+')':l.map(function(a){return a==='EVOLUTION'?'Evolution':areaLabel(a);}).join(', ');}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function clasificar(mov,desc,abono){var h=(mov+' '+desc).toUpperCase();for(var i=0;i<REGLAS.length;i++)if(h.indexOf(REGLAS[i][0])!==-1)return REGLAS[i][1];return (abono&&abono>0)?'INGRESO':'REVISAR';}
 
@@ -385,8 +398,13 @@ async function deleteMov(sig){
   delete DB.movs[sig];
   setSync('eliminado ✓');
   buildFilters();
+  renderActual();
+}
+function renderActual(){
   var v=document.querySelector('nav button.on')?document.querySelector('nav button.on').dataset.v:'mes';
-  if(v==='mes')renderMes();else if(v==='ventas')renderVentas();else if(v==='cobranza')renderCobranza();else if(v==='consol')renderConsol();
+  var y=window.scrollY;
+  if(v==='mes')renderMes();else if(v==='ventas')renderVentas();else if(v==='cobranza')renderCobranza();else if(v==='cac')renderCAC();else if(v==='fijos')renderFijos();else if(v==='consol')renderConsol();
+  window.scrollTo(0,y);
 }
 // ============ Asesores ============
 async function cargarAsesores(){
@@ -526,15 +544,31 @@ async function guardar(){
 // ============ Datos ============
 function allMovs(){return Object.keys(DB.movs).map(function(k){return DB.movs[k];});}
 function movsDe(ymStr){return allMovs().filter(function(m){return ym(m.fecha)===ymStr;}).sort(function(a,b){return b.fecha<a.fecha?-1:1;});}
-function egresoPEN(movs){var t=0;movs.forEach(function(m){if(m.cargo>0&&m.moneda!=='USD')t+=m.cargo;});return t;}
 function totales(movs){var o={ingS:0,ingU:0,egrS:0,egrU:0};movs.forEach(function(m){if(m.abono>0){if(m.moneda==='USD')o.ingU+=m.abono;else o.ingS+=m.abono;}else{if(m.moneda==='USD')o.egrU+=m.cargo;else o.egrS+=m.cargo;}});return o;}
 function pctQueda(ingS,egrS){return ingS>0?(ingS-egrS)/ingS*100:(egrS>0?-100:0);}
-function distNucleo(movs){
-  var by={},fij={},tot=0,totFijo=0;NUCLEO.forEach(function(a){by[a]=0;fij[a]=0;});
-  movs.forEach(function(m){if(m.cargo>0&&m.moneda!=='USD'){repartir(m,m.cargo,function(a,v){if(NUCLEO.indexOf(a)!==-1){by[a]+=v;tot+=v;if(m.esFijo){fij[a]+=v;totFijo+=v;}}});}});
-  return {rows:NUCLEO.map(function(a){var g=by[a];var pct=tot?g/tot*100:0;var rec=RECOM[a];var st=g===0?'na':(pct>rec+0.05?'ex':'ok');return {area:a,gastado:g,fijo:fij[a],pct:pct,recom:rec,status:st};}),tot:tot,totFijo:totFijo};
+// Suma los egresos por área en soles y en dólares por separado (con los fijos ya repartidos).
+// 'eq' = soles + dólares al TC del mes: solo se usa para calcular los %.
+function sumarAreas(movs,areas){
+  var o={};areas.forEach(function(a){o[a]={s:0,u:0,fs:0,fu:0,eq:0,ops:0};});
+  var T={s:0,u:0,fs:0,fu:0,eq:0};
+  movs.forEach(function(m){if(!(m.cargo>0))return;var usd=m.moneda==='USD';var tc=usd?tcDe(m):1;var tocadas={};
+    repartir(m,m.cargo,function(a,v){var r=o[a];if(!r)return;
+      if(usd){r.u+=v;T.u+=v;if(m.esFijo){r.fu+=v;T.fu+=v;}}else{r.s+=v;T.s+=v;if(m.esFijo){r.fs+=v;T.fs+=v;}}
+      r.eq+=v*tc;T.eq+=v*tc;if(!tocadas[a]){tocadas[a]=1;r.ops++;}});});
+  return {by:o,tot:T};
 }
-function distSeg(movs){var totEgr=egresoPEN(movs);return SEG.map(function(a){var g=0,n=0;movs.forEach(function(m){if(m.cargo>0&&m.moneda!=='USD'){var toca=false;repartir(m,m.cargo,function(x,v){if(x===a){g+=v;toca=true;}});if(toca)n++;}});return {area:a,gastado:g,pct:totEgr?g/totEgr*100:0,ops:n};});}
+function distNucleo(movs){
+  var x=sumarAreas(movs,NUCLEO),T=x.tot;
+  return {rows:NUCLEO.map(function(a){var r=x.by[a];var pct=T.eq?r.eq/T.eq*100:0;var rec=RECOM[a];var st=r.eq===0?'na':(pct>rec+0.05?'ex':'ok');
+    return {area:a,gastado:r.s,gastadoU:r.u,fijo:r.fs,fijoU:r.fu,pct:pct,recom:rec,status:st};}),
+    tot:T.s,totU:T.u,totFijo:T.fs,totFijoU:T.fu};
+}
+function distSeg(movs){
+  var totEgr=0;movs.forEach(function(m){if(m.cargo>0)totEgr+=montoPEN(m,true);});
+  var x=sumarAreas(movs,SEG);
+  return SEG.map(function(a){var r=x.by[a];return {area:a,gastado:r.s,gastadoU:r.u,pct:totEgr?r.eq/totEgr*100:0,ops:r.ops};});
+}
+function SU(s,u){return (s||!u?S(s):'')+(s&&u?'<div style="font-size:11px;color:var(--muted)">':'')+(u?U(u):'')+(s&&u?'</div>':'');}
 
 // ============ MES ============
 var FILTER='all',SEARCH='',AREAF='',ASESORF='',CLASF='';
@@ -542,7 +576,7 @@ function buildFilters(){
   var ymset={};allMovs().forEach(function(m){ymset[ym(m.fecha)]=true;});
   var yms=Object.keys(ymset).sort().reverse();
   var mesOptsHtml=yms.map(function(y){var p=y.split('-');return '<option value="'+y+'">'+MESES[+p[1]-1]+' '+p[0]+'</option>';}).join('')||'<option>—</option>';
-  ['selMes','selMesV','selMesC','selMesCAC'].forEach(function(id){var sel=document.getElementById(id);var cur=sel.value;sel.innerHTML=mesOptsHtml;if(yms.indexOf(cur)!==-1)sel.value=cur;});
+  ['selMes','selMesV','selMesC','selMesCAC','selMesF'].forEach(function(id){var sel=document.getElementById(id);var cur=sel.value;sel.innerHTML=mesOptsHtml;if(yms.indexOf(cur)!==-1)sel.value=cur;});
   var anios={};yms.forEach(function(y){anios[y.slice(0,4)]=true;});
   var sa=document.getElementById('selAnio');sa.innerHTML=Object.keys(anios).sort().reverse().map(function(a){return '<option>'+a+'</option>';}).join('')||'<option>—</option>';
 }
@@ -567,11 +601,11 @@ function renderMes(){
   '</div>';
   var dn=distNucleo(movs);
   var distRows=dn.rows.map(function(d){var st=d.status==='ok'?'<span class="status st-ok">OK</span>':d.status==='ex'?'<span class="status st-ex">Excedido</span>':'<span class="status st-na">—</span>';
-    return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num" style="color:var(--muted)">'+(d.fijo?S(d.fijo):'—')+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.recom.toFixed(1)+'%</td><td>'+st+'</td></tr>';}).join('');
-  var distCard='<div class="card"><h3>Distribución por área <span class="m">· núcleo (100%) · los costos fijos se reparten en partes iguales entre las áreas elegidas</span></h3><div class="tablescroll"><table><thead><tr><th>Área</th><th class="num">Gastado</th><th class="num">De costos fijos</th><th class="num">% Egreso</th><th class="num">% Recomendado</th><th>Status</th></tr></thead><tbody>'+distRows+'<tr style="font-weight:700"><td>TOTAL NÚCLEO</td><td class="num">'+S(dn.tot)+'</td><td class="num">'+(dn.totFijo?S(dn.totFijo):'—')+'</td><td class="num">100%</td><td class="num">100%</td><td></td></tr></tbody></table></div></div>';
-  var ds=distSeg(movs);var segTot=ds.reduce(function(s,d){return s+d.gastado;},0);var segOps=ds.reduce(function(s,d){return s+d.ops;},0);
-  var segRows=ds.map(function(d){return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.ops+'</td></tr>';}).join('');
-  var segCard='<div class="card"><h3>Otros egresos <span class="m">· fuera del núcleo, no afectan el 100%</span></h3><table><thead><tr><th>Área</th><th class="num">Gastado</th><th class="num">% s/ Egreso</th><th class="num"># Ops</th></tr></thead><tbody>'+segRows+'<tr style="font-weight:700"><td>SUBTOTAL</td><td class="num">'+S(segTot)+'</td><td class="num"></td><td class="num">'+segOps+'</td></tr></tbody></table></div>';
+    return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num">'+(d.gastadoU?U(d.gastadoU):'—')+'</td><td class="num" style="color:var(--muted)">'+(d.fijo||d.fijoU?SU(d.fijo,d.fijoU):'—')+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.recom.toFixed(1)+'%</td><td>'+st+'</td></tr>';}).join('');
+  var distCard='<div class="card"><h3>Distribución por área <span class="m">· núcleo (100%) · los costos fijos se reparten en partes iguales entre las áreas elegidas</span></h3><div class="tablescroll"><table><thead><tr><th>Área</th><th class="num">Gastado S/</th><th class="num">Gastado $</th><th class="num">De costos fijos</th><th class="num">% Egreso</th><th class="num">% Recomendado</th><th>Status</th></tr></thead><tbody>'+distRows+'<tr style="font-weight:700"><td>TOTAL NÚCLEO</td><td class="num">'+S(dn.tot)+'</td><td class="num">'+(dn.totU?U(dn.totU):'—')+'</td><td class="num">'+(dn.totFijo||dn.totFijoU?SU(dn.totFijo,dn.totFijoU):'—')+'</td><td class="num">100%</td><td class="num">100%</td><td></td></tr></tbody></table></div><p class="note" style="margin-top:8px">Soles y dólares se muestran por separado. Para el % se suman los dólares al TC del mes ('+tc.toFixed(3)+').</p></div>';
+  var ds=distSeg(movs);var segTot=ds.reduce(function(s,d){return s+d.gastado;},0);var segTotU=ds.reduce(function(s,d){return s+d.gastadoU;},0);var segOps=ds.reduce(function(s,d){return s+d.ops;},0);
+  var segRows=ds.map(function(d){return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num">'+(d.gastadoU?U(d.gastadoU):'—')+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.ops+'</td></tr>';}).join('');
+  var segCard='<div class="card"><h3>Otros egresos <span class="m">· fuera del núcleo, no afectan el 100%</span></h3><div class="tablescroll"><table><thead><tr><th>Área</th><th class="num">Gastado S/</th><th class="num">Gastado $</th><th class="num">% s/ Egreso</th><th class="num"># Ops</th></tr></thead><tbody>'+segRows+'<tr style="font-weight:700"><td>SUBTOTAL</td><td class="num">'+S(segTot)+'</td><td class="num">'+(segTotU?U(segTotU):'—')+'</td><td class="num"></td><td class="num">'+segOps+'</td></tr></tbody></table></div></div>';
   var areaOpts='<option value="">Todas las áreas</option>'+AREAS.map(function(a){return '<option value="'+a+'"'+(AREAF===a?' selected':'')+'>'+areaLabel(a)+'</option>';}).join('');
   var asesorFOpts='<option value="">Todos los asesores</option>'+DB.asesores.map(function(a){return '<option value="'+a.nombre+'"'+(ASESORF===a.nombre?' selected':'')+'>'+a.nombre+'</option>';}).join('');
   var clasFOpts='<option value="">Toda clasificación</option>'+Object.keys(CLAS_LABEL).filter(function(c){return c;}).map(function(c){return '<option value="'+c+'"'+(CLASF===c?' selected':'')+'>'+CLAS_LABEL[c]+'</option>';}).join('');
@@ -633,7 +667,7 @@ function abrirReparto(sig){
   var sel=areasReparto(m);
   var w=document.createElement('div');w.id='repModal';
   w.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);display:grid;place-items:center;z-index:1000;padding:16px';
-  var checks=AREAS_REPARTO.map(function(a){return '<label style="display:flex;align-items:center;gap:8px;margin:6px 0;font-size:14px"><input type="checkbox" class="repChk" value="'+a+'"'+(sel.indexOf(a)!==-1?' checked':'')+'> '+a+'</label>';}).join('');
+  var checks=AREAS_REPARTO.map(function(a){return '<label style="display:flex;align-items:center;gap:8px;margin:6px 0;font-size:14px"><input type="checkbox" class="repChk" value="'+a+'"'+(sel.indexOf(a)!==-1?' checked':'')+'> '+areaLabel(a)+'</label>';}).join('');
   w.innerHTML='<div class="card" style="max-width:380px;width:100%;margin:0">'
     +'<h3>Reparto del costo fijo</h3>'
     +'<p class="note" style="margin:0 0 8px">'+dmy(m.fecha)+' · '+esc(m.desc||m.mov)+' · <b>'+fmtMon(m)+'</b></p>'
@@ -651,7 +685,7 @@ function abrirReparto(sig){
   document.getElementById('repOk').onclick=function(){
     var l=marcadas();if(!l.length){alert('Marca al menos un área.');return;}
     m.reparto=(l.length===AREAS_REPARTO.length)?'':l.join(',');
-    updateMov(m);w.remove();var y=window.scrollY;renderMes();window.scrollTo(0,y);
+    updateMov(m);w.remove();renderActual();
   };
 }
 
@@ -1028,6 +1062,60 @@ function wireLeyendaToggle(){
   if(btn)btn.onclick=function(){CAC_MOSTRAR_LEYENDA=!CAC_MOSTRAR_LEYENDA;renderCAC();};
 }
 
+// ============ COSTOS FIJOS ============
+// Normaliza la descripción del banco para reconocer el mismo gasto en otros meses (sin números de operación/fechas)
+function claveGasto(m){return ((m.mov||'')+' '+(m.desc||'')).toUpperCase().replace(/[0-9]+/g,'').replace(/[^A-ZÁÉÍÓÚÑ ]/g,' ').replace(/\s+/g,' ').trim();}
+function renderFijos(){
+  var ymStr=document.getElementById('selMesF').value;
+  var fd=document.getElementById('fDesde').value,fh=document.getElementById('fHasta').value;
+  var base=((fd||fh)?allMovs():movsDe(ymStr)).filter(function(m){return (!fd||m.fecha>=fd)&&(!fh||m.fecha<=fh);});
+  var fijos=base.filter(function(m){return m.cargo>0&&m.esFijo;}).sort(function(a,b){return b.cargo-a.cargo;});
+  var box=document.getElementById('fijosBody');var dis=READONLY?' disabled':'';
+  // posibles fijos: egresos del período con la misma descripción que un gasto ya marcado como fijo en otro momento
+  var conocidas={};allMovs().forEach(function(m){if(m.cargo>0&&m.esFijo)conocidas[claveGasto(m)]=m;});
+  var sugeridos=base.filter(function(m){return m.cargo>0&&!m.esFijo&&conocidas[claveGasto(m)];});
+  var rango=(fd||fh)?((fd?dmy(fd):'inicio')+' a '+(fh?dmy(fh):'hoy')):(ymStr&&ymStr.indexOf('-')!==-1?MESES[+ymStr.slice(5,7)-1]+' '+ymStr.slice(0,4):'');
+  var sugCard='';
+  if(sugeridos.length){
+    sugCard='<div class="card"><h3>¿Faltan marcar? <span class="m">· egresos iguales a gastos que ya marcaste como fijos antes</span></h3><div class="tablescroll"><table><thead><tr><th>Fecha</th><th>Descripción</th><th class="num">Monto</th><th>Reparto que se copiará</th>'+(READONLY?'':'<th></th>')+'</tr></thead><tbody>'
+      +sugeridos.map(function(m){var ref=conocidas[claveGasto(m)];return '<tr><td>'+dmy(m.fecha)+'</td><td>'+esc(m.mov)+' · '+esc(m.desc)+'</td><td class="num m-egr">'+fmtMon(m)+'</td><td class="note">'+esc(repartoTxt(ref))+'</td>'+(READONLY?'':'<td><button class="ghost sugFijo" data-sig="'+encodeURIComponent(sigOf(m))+'">Marcar fijo</button></td>')+'</tr>';}).join('')
+      +'</tbody></table></div></div>';
+  }
+  if(!fijos.length){box.innerHTML=sugCard+'<div class="card"><div class="empty">No hay egresos marcados como costo fijo en este rango. Márcalos en "Movimientos" → Detalle → columna Fijo.</div></div>';wireFijos(conocidas);return;}
+  var x=sumarAreas(fijos,AREAS_REPARTO),T=x.tot;
+  // colaboradores activos en el período (lista de Personal)
+  var r=(fd||fh)?{start:fd,end:fh}:(ymStr&&ymStr.indexOf('-')!==-1?monthRange(ymStr):{start:'',end:''});
+  var nColab=DB.asesores.filter(function(a){return activoEnRango(a,r.start,r.end);}).length;
+  var kpis='<div class="kpis">'
+    +'<div class="kpi egr"><div class="l">Costos fijos en soles</div><div class="v">'+S(T.s)+'</div><div class="x">'+rango+'</div></div>'
+    +'<div class="kpi egr"><div class="l">Costos fijos en dólares</div><div class="v">'+U(T.u)+'</div><div class="x">sin convertir</div></div>'
+    +'<div class="kpi"><div class="l">Gastos fijos</div><div class="v">'+fijos.length+'</div><div class="x">movimientos marcados</div></div>'
+    +'<div class="kpi"><div class="l">Costo por colaborador</div><div class="v">'+(nColab?S(T.s/nColab):'—')+'</div><div class="x">'+(nColab?U(T.u/nColab)+' · '+nColab+' colaboradores activos':'agrega el personal en Ventas')+'</div></div>'
+  +'</div>';
+  var maxEq=Math.max.apply(null,AREAS_REPARTO.map(function(a){return x.by[a].eq;}).concat([1]));
+  var areaRows=AREAS_REPARTO.map(function(a){var o=x.by[a];var pct=T.eq?o.eq/T.eq*100:0;
+    return '<tr><td><b>'+areaLabel(a)+'</b></td><td class="num">'+(o.s?S(o.s):'—')+'</td><td class="num">'+(o.u?U(o.u):'—')+'</td><td class="num">'+pct.toFixed(1)+'%</td><td style="width:30%"><div class="track" style="height:8px"><div class="fill" style="height:8px;width:'+(o.eq/maxEq*100).toFixed(1)+'%;background:'+(AREA_COLOR[a]||'#64748b')+'"></div></div></td></tr>';}).join('');
+  var areaCard='<div class="card"><h3>Distribución por área <span class="m">· cuánto costo fijo carga cada área</span></h3><div class="tablescroll"><table><thead><tr><th>Área</th><th class="num">Soles</th><th class="num">Dólares</th><th class="num">% del total</th><th></th></tr></thead><tbody>'+areaRows
+    +'<tr style="font-weight:700"><td>TOTAL</td><td class="num">'+S(T.s)+'</td><td class="num">'+U(T.u)+'</td><td class="num">100%</td><td></td></tr></tbody></table></div>'
+    +'<p class="note" style="margin-top:8px">Soles y dólares por separado. El % suma los dólares al TC del mes. Evolution es una entidad aparte: su parte no entra en el 100% de las áreas de Grupo Robles.</p></div>';
+  var head='<tr><th>Fecha</th><th>Gasto</th><th class="num">Monto</th><th>Reparto</th>'+AREAS_REPARTO.map(function(a){return '<th class="num">'+(a==='EVOLUTION'?'Evolution':areaLabel(a))+'</th>';}).join('')+(READONLY?'':'<th></th>')+'</tr>';
+  var body=fijos.map(function(m){var sigEnc=encodeURIComponent(sigOf(m));var l=areasReparto(m);var parte=m.cargo/l.length;var mon=m.moneda==='USD'?U:S;
+    var repCell=READONLY?'<span class="note">÷ '+esc(repartoTxt(m))+'</span>':'<button class="ghost repBtn" data-sig="'+sigEnc+'" style="font-size:11px;padding:3px 8px;white-space:nowrap">÷ '+esc(repartoTxt(m))+'</button>';
+    return '<tr><td>'+dmy(m.fecha)+'</td><td>'+esc(m.desc||m.mov)+(m.obs?'<div class="note">'+esc(m.obs)+'</div>':'')+'</td><td class="num m-egr">'+fmtMon(m)+'</td><td>'+repCell+'</td>'
+      +AREAS_REPARTO.map(function(a){return '<td class="num">'+(l.indexOf(a)!==-1?mon(parte):'<span class="note">—</span>')+'</td>';}).join('')
+      +(READONLY?'':'<td><label class="note" style="white-space:nowrap"><input type="checkbox" class="fijoOff" data-sig="'+sigEnc+'" checked> Fijo</label></td>')+'</tr>';}).join('');
+  var totRow='<tr style="font-weight:700"><td colspan="4">TOTAL POR ÁREA</td>'+AREAS_REPARTO.map(function(a){return '<td class="num">'+SU(x.by[a].s,x.by[a].u)+'</td>';}).join('')+(READONLY?'':'<td></td>')+'</tr>';
+  var matriz='<div class="card"><h3>Detalle por gasto <span class="m">· cómo se reparte cada costo fijo · toca el botón ÷ para elegir las áreas</span></h3><div class="tablescroll"><table><thead>'+head+'</thead><tbody>'+body+totRow+'</tbody></table></div></div>';
+  box.innerHTML=kpis+sugCard+areaCard+matriz;
+  wireFijos(conocidas);
+}
+function wireFijos(conocidas){
+  if(READONLY)return;var box=document.getElementById('fijosBody');
+  Array.prototype.forEach.call(box.querySelectorAll('.repBtn'),function(b){b.onclick=function(){abrirReparto(decodeURIComponent(b.dataset.sig));};});
+  Array.prototype.forEach.call(box.querySelectorAll('.fijoOff'),function(c){c.onchange=function(){var m=DB.movs[decodeURIComponent(c.dataset.sig)];if(!m)return;m.esFijo=c.checked;updateMov(m);renderActual();};});
+  Array.prototype.forEach.call(box.querySelectorAll('.sugFijo'),function(b){b.onclick=function(){var m=DB.movs[decodeURIComponent(b.dataset.sig)];if(!m)return;var ref=conocidas[claveGasto(m)];m.esFijo=true;m.reparto=ref?(ref.reparto||''):'';updateMov(m);renderActual();};});
+}
+
 // ============ CONSOLIDADO ============
 function consolMovs(){
   var anio=document.getElementById('selAnio').value;
@@ -1239,8 +1327,8 @@ function renderConsolGeneral(){
   var trendCard='<div class="card"><h3>Tendencia por área <span class="m">· % real vs recomendado, mes a mes</span></h3>'+trendChart(AREAS_TREND_SEL,present,byMonthDist)+'</div>';
   var dnPeriodo=distNucleo(movs);
   var resumenRows=dnPeriodo.rows.filter(function(d){return AREAS_TREND_SEL.indexOf(d.area)!==-1;}).map(function(d){var st=d.status==='ok'?'<span class="status st-ok">OK</span>':d.status==='ex'?'<span class="status st-ex">Excedido</span>':'<span class="status st-na">—</span>';
-    return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.recom.toFixed(1)+'%</td><td>'+st+'</td></tr>';}).join('');
-  var resumenCard='<div class="card"><h3>Resumen del período <span class="m">· % acumulado vs recomendado</span></h3><table><thead><tr><th>Área</th><th class="num">Gastado</th><th class="num">% del período</th><th class="num">% Recomendado</th><th>Status</th></tr></thead><tbody>'+(resumenRows||'<tr><td colspan="5"><div class="empty">Marca al menos un área arriba.</div></td></tr>')+'</tbody></table></div>';
+    return '<tr><td><b>'+areaLabel(d.area)+'</b></td><td class="num">'+S(d.gastado)+'</td><td class="num">'+(d.gastadoU?U(d.gastadoU):'—')+'</td><td class="num">'+d.pct.toFixed(1)+'%</td><td class="num">'+d.recom.toFixed(1)+'%</td><td>'+st+'</td></tr>';}).join('');
+  var resumenCard='<div class="card"><h3>Resumen del período <span class="m">· % acumulado vs recomendado · el % suma los dólares al TC del mes</span></h3><div class="tablescroll"><table><thead><tr><th>Área</th><th class="num">Gastado S/</th><th class="num">Gastado $</th><th class="num">% del período</th><th class="num">% Recomendado</th><th>Status</th></tr></thead><tbody>'+(resumenRows||'<tr><td colspan="6"><div class="empty">Marca al menos un área arriba.</div></td></tr>')+'</tbody></table></div></div>';
   box.innerHTML=kpis+chart+rankCard+filtroCard+trendCard+resumenCard+pivotCard;
   Array.prototype.forEach.call(box.querySelectorAll('.trendAreaChk'),function(c){c.onchange=function(){
     AREAS_TREND_SEL=Array.prototype.filter.call(document.querySelectorAll('.trendAreaChk'),function(x){return x.checked;}).map(function(x){return x.value;});
@@ -1261,16 +1349,16 @@ function exportar(scope){
   A.push(['Egresos',r2(HT.egrS),HT.egrU?('$ '+r2(HT.egrU)):'']);
   A.push(['Resultado (queda)',r2(HT.ingS-HT.egrS),pctQueda(HT.ingS,HT.egrS).toFixed(1)+'%']);
   if(mesMovs){var sal=DB.saldos[document.getElementById('selMes').value]||{};A.push(['Saldo final (banco)',sal.soles!=null?r2(sal.soles):'',sal.dolares!=null?('$ '+r2(sal.dolares)):'']);}
-  A.push([]);A.push(['DISTRIBUCIÓN POR ÁREA (NÚCLEO 100%)']);A.push(['Área','Gastado S/','% Egreso','% Recomendado','Status']);
-  var dn=distNucleo(head);dn.rows.forEach(function(d){A.push([areaLabel(d.area),r2(d.gastado),d.pct.toFixed(1)+'%',d.recom+'%',statusTxt(d.status)]);});
-  A.push(['TOTAL NÚCLEO',r2(dn.tot),'100%','100%','']);A.push([]);A.push(['SEGUIMIENTO (FUERA DEL 100%)']);A.push(['Área','Gastado S/','% s/ Egreso','# Ops']);
-  distSeg(head).forEach(function(d){A.push([areaLabel(d.area),r2(d.gastado),d.pct.toFixed(1)+'%',d.ops]);});
+  A.push([]);A.push(['DISTRIBUCIÓN POR ÁREA (NÚCLEO 100%)']);A.push(['Área','Gastado S/','Gastado US$','De costos fijos S/','De costos fijos US$','% Egreso','% Recomendado','Status']);
+  var dn=distNucleo(head);dn.rows.forEach(function(d){A.push([areaLabel(d.area),r2(d.gastado),r2(d.gastadoU),r2(d.fijo),r2(d.fijoU),d.pct.toFixed(1)+'%',d.recom+'%',statusTxt(d.status)]);});
+  A.push(['TOTAL NÚCLEO',r2(dn.tot),r2(dn.totU),r2(dn.totFijo),r2(dn.totFijoU),'100%','100%','']);A.push([]);A.push(['SEGUIMIENTO (FUERA DEL 100%)']);A.push(['Área','Gastado S/','Gastado US$','% s/ Egreso','# Ops']);
+  distSeg(head).forEach(function(d){A.push([areaLabel(d.area),r2(d.gastado),r2(d.gastadoU),d.pct.toFixed(1)+'%',d.ops]);});
   A.push([]);A.push([]);A.push(['CONSOLIDADO '+anio+' (resumen)']);A.push(['Mes','Ingresos S/','Egresos S/','Resultado S/','% que queda']);
   var mm={};for(var i=1;i<=12;i++)mm[i]={ing:0,egr:0};
   allMovs().filter(function(m){return m.fecha.slice(0,4)===anio&&m.moneda!=='USD';}).forEach(function(m){var n=+m.fecha.slice(5,7);if(m.abono>0)mm[n].ing+=m.abono;else mm[n].egr+=m.cargo;});
   var tI=0,tE=0;for(var i=1;i<=12;i++){if(mm[i].ing||mm[i].egr){A.push([MESES[i-1],r2(mm[i].ing),r2(mm[i].egr),r2(mm[i].ing-mm[i].egr),pctQueda(mm[i].ing,mm[i].egr).toFixed(1)+'%']);tI+=mm[i].ing;tE+=mm[i].egr;}}
   A.push(['TOTAL',r2(tI),r2(tE),r2(tI-tE),pctQueda(tI,tE).toFixed(1)+'%']);
-  var ws=XLSX.utils.aoa_to_sheet(A);ws['!cols']=[{wch:34},{wch:15},{wch:15},{wch:15},{wch:12}];
+  var ws=XLSX.utils.aoa_to_sheet(A);ws['!cols']=[{wch:34},{wch:15},{wch:15},{wch:15},{wch:15},{wch:12},{wch:14},{wch:10}];
   var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'FLUJO DE CAJA');
   var det=(mesMovs?mesMovs:movs).map(function(m){var ing=esIngreso(m);return {Fecha:dmy(m.fecha),'N° operación':m.numOp||'',Movimiento:m.mov,'Descripción':m.desc,Moneda:m.moneda,Cargo:m.cargo||'',Abono:m.abono||'','TC':getTC(ym(m.fecha)),Tipo:ing?'Ingreso':'Egreso','Área':areaLabel(m.area),
     'Clasificación':ing?clasLabel(m.clas).replace('—',''):'','Asesor':m.asesor||'','Cliente':m.cliente||'','Lote':m.lote||'','Proyecto':m.proyecto||'','M²':m.m2===''||m.m2==null?'':m.m2,'Concepto':m.concepto||'','Cuota':m.cuota||'','Método de pago':m.metodoPago||'',
@@ -1374,6 +1462,10 @@ document.getElementById('selMesCAC').onchange=renderCAC;
 document.getElementById('cacDesde').onchange=renderCAC;
 document.getElementById('cacHasta').onchange=renderCAC;
 document.getElementById('cacReset').onclick=function(){document.getElementById('cacDesde').value='';document.getElementById('cacHasta').value='';renderCAC();};
+document.getElementById('selMesF').onchange=renderFijos;
+document.getElementById('fDesde').onchange=renderFijos;
+document.getElementById('fHasta').onchange=renderFijos;
+document.getElementById('fReset').onclick=function(){document.getElementById('fDesde').value='';document.getElementById('fHasta').value='';renderFijos();};
 document.getElementById('selAnio').onchange=renderConsol;
 document.getElementById('cDesde').onchange=renderConsol;
 document.getElementById('cHasta').onchange=renderConsol;
@@ -1389,7 +1481,7 @@ Array.prototype.forEach.call(document.querySelectorAll('nav button'),function(b)
   Array.prototype.forEach.call(document.querySelectorAll('nav button'),function(x){x.classList.remove('on');});b.classList.add('on');
   Array.prototype.forEach.call(document.querySelectorAll('.view'),function(v){v.classList.remove('on');});
   document.getElementById('v-'+b.dataset.v).classList.add('on');setBrand(b.dataset.v);
-  if(b.dataset.v==='mes')renderMes();if(b.dataset.v==='ventas')renderVentas();if(b.dataset.v==='cobranza')renderCobranza();if(b.dataset.v==='cac')renderCAC();if(b.dataset.v==='consol')renderConsol();};});
+  if(b.dataset.v==='mes')renderMes();if(b.dataset.v==='ventas')renderVentas();if(b.dataset.v==='cobranza')renderCobranza();if(b.dataset.v==='cac')renderCAC();if(b.dataset.v==='fijos')renderFijos();if(b.dataset.v==='consol')renderConsol();};});
 
 // ============ Arranque ============
 (async function(){ var s=await sb.auth.getSession(); if(s.data&&s.data.session){ await iniciar(); } else { showLogin(); } })();
