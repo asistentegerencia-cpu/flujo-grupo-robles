@@ -1839,13 +1839,17 @@ function conciliarAuto(bank,pagos){
   // Si la administradora ya puso cliente o lote en el movimiento, solo se acepta un pago de ese cliente o lote
   // Si el que deposita es un cliente conocido de Evolta, solo se cruza con pagos de ese cliente
   B.forEach(function(bb){var bt=cToks(bb.b.desc);bb.conocido=bt.length>=2&&P.some(function(x){if(cDias(x.p.fecha,bb.b.f)>60)return false;var n=0;bt.forEach(function(t){if(x.tk[t])n++;});return n>=2;});});
-  function pista(x,bb){var b=bb.b;if(bb.conocido&&score(x,bb)===0)return false;if(!b.cliente&&!b.lote)return true;
+  function pista(x,bb){var b=bb.b;if(bb.conocido&&score(x,bb)===0)return false;
+if(!b.cliente&&!b.lote)return true;
     if(b.lote&&x.lt&&cLote(b.lote)===x.lt)return true;var c=0;cToks(b.cliente).forEach(function(t){if(x.tk[t])c++;});return c>0;}
   function libre(bb,x){return !bb.m&&(!x||pista(x,bb));}
   function amtOK(x,b,tol){var p=x.p;
     if(b.mon==='USD'){if(p.tc>1&&p.tc<5&&Math.abs(b.ab*p.tc-p.monto)<=Math.max(2,p.monto*0.01))return true;if(Math.abs(b.ab-p.monto)<=1)return true;}
     return Math.abs(b.s-p.monto)<=Math.max(0.5,p.monto*tol);}
-  function link(x,list,how){list.forEach(function(bb){bb.m=x;});x.bs=list;x.how=how;}
+  // Si el depósito trae el nombre de otra persona, el cruce queda "por confirmar"
+  function otroNombre(x,bb){var b=bb.b;if(b.cliente||b.lote)return false;var tf=cNorm(b.desc).match(/^TRANSF (\w{3,5})/);
+    if(tf)return !Object.keys(x.tk).some(function(t){return t.indexOf(tf[1])===0;});return cToks(b.desc).length>=2&&score(x,bb)===0;}
+  function link(x,list,how){list.forEach(function(bb){bb.m=x;});x.bs=list;x.how=how+(list.some(function(bb){return otroNombre(x,bb);})?' · otro nombre, por confirmar':'');}
   // 1) N° de operación
   P.forEach(function(x){var ops=String(x.p.nro_op||'').split(/[-\/ ]+/).map(nd).filter(function(o){return o.length>=4;});if(!ops.length)return;
     var cs=B.filter(function(bb){var o2=nd(bb.b.op||'');return libre(bb)&&o2&&cDias(bb.b.f,x.p.fecha)<=10&&ops.some(function(o){return o2.slice(-o.length)===o||o.slice(-o2.length)===o2;});});
@@ -1908,6 +1912,7 @@ function enlacesPago(){var o={};Object.keys(CONC.rows).forEach(function(s){(CONC
 function periodoConc(){var y=CV.ym;return y.length===4?function(f){return f.slice(0,4)===y;}:function(f){return f.slice(0,7)===y;};}
 function ingresosConc(){return allMovs().filter(function(m){return m.abono>0;});}
 function esClienteIng(m){return m.clas!=='FINANCIAMIENTO';}
+function porConfirmar(r){return !!(r&&r.tipo==='evolta'&&/confirmar/.test(r.metodo||''));}
 function concMesesDisp(){var o={};ingresosConc().forEach(function(m){o[ym(m.fecha)]=1;});return Object.keys(o).sort();}
 
 // ============ Conciliación: pantalla ============
@@ -1917,7 +1922,7 @@ function renderConc(){
   var meses=concMesesDisp();if(!meses.length){box.innerHTML='<div class="card">'+emptyHtml('tray','Aún no hay ingresos del banco','Sube un estado de cuenta en "Cargar".','dash')+'</div>';return;}
   var anio=meses[meses.length-1].slice(0,4);
   var links=enlacesPago(),ing=ingresosConc();
-  var pendMes={};ing.forEach(function(m){if(esClienteIng(m)&&!CONC.rows[m.sig]){var k=ym(m.fecha);pendMes[k]=(pendMes[k]||0)+1;}});
+  var pendMes={};ing.forEach(function(m){if(esClienteIng(m)&&(!CONC.rows[m.sig]||porConfirmar(CONC.rows[m.sig]))){var k=ym(m.fecha);pendMes[k]=(pendMes[k]||0)+1;}});
   var sinBanco={};Object.keys(CONC.pagos).forEach(function(k){var p=CONC.pagos[k];if(!links[k]&&!p.rev_estado&&p.fecha.slice(0,4)===anio){var y=p.fecha.slice(0,7);sinBanco[y]=(sinBanco[y]||0)+1;}});
   if(!CV.ym||(CV.ym.length===7&&meses.indexOf(CV.ym)===-1)){CV.ym=meses.filter(function(y){return y.slice(0,4)===anio&&(pendMes[y]||sinBanco[y]);})[0]||meses[meses.length-1];}
   var enP=periodoConc();
@@ -1941,17 +1946,17 @@ function renderConc(){
   // Totales del periodo
   var movsP=allMovs().filter(function(m){return enP(m.fecha);});
   var ingP=movsP.filter(function(m){return m.abono>0&&esClienteIng(m);});
-  var tot=0,conc=0,nPend=0,sPend=0;ingP.forEach(function(m){var s=solesDe(m);tot+=s;if(CONC.rows[m.sig])conc+=s;else{nPend++;sPend+=s;}});
+  var tot=0,conc=0,nPend=0,sPend=0,nConf=0;ingP.forEach(function(m){var s=solesDe(m);tot+=s;if(CONC.rows[m.sig]){conc+=s;if(porConfirmar(CONC.rows[m.sig]))nConf++;}else{nPend++;sPend+=s;}});
   var evSin=Object.keys(CONC.pagos).map(function(k){return CONC.pagos[k];}).filter(function(p){return enP(p.fecha)&&!links[p.k];});
   var evSinPend=evSin.filter(function(p){return !p.rev_estado;});var sEv=evSinPend.reduce(function(a,p){return a+p.monto;},0);
   var titulo=CV.ym.length===4?'el año '+CV.ym:mesLargo(CV.ym);
   var kp='<div class="kpis4">'
     +kpiCard('Ingresos de clientes · banco',S(tot),ingP.length+' movimientos en '+titulo,{ico:'<span class="ico pos">'+ico('bank')+'</span>'})
-    +kpiCard('Conciliado',(tot?Math.round(conc/tot*100):0)+'%',S(conc)+' con cliente identificado',{vcls:'pos',extra:'<div class="track" style="margin-top:6px"><div class="fill" style="width:'+(tot?conc/tot*100:0).toFixed(1)+'%;background:var(--gr-pos)"></div></div>'})
+    +kpiCard('Conciliado',(tot?Math.round(conc/tot*100):0)+'%',S(conc)+' con cliente identificado'+(nConf?' · '+nConf+' por confirmar':''),{vcls:'pos',extra:'<div class="track" style="margin-top:6px"><div class="fill" style="width:'+(tot?conc/tot*100:0).toFixed(1)+'%;background:var(--gr-pos)"></div></div>'})
     +kpiCard('Pendientes en el banco',String(nPend),nPend?S(sPend)+' sin cliente asignado':'Todo el dinero tiene dueño',{cls:nPend?'kpi-warn':'kpi-posbox'})
     +kpiCard('En Evolta, sin dinero en el banco',String(evSinPend.length),evSinPend.length?S(sEv)+' por revisar':'Nada por revisar',{cls:evSinPend.length?'kpi-warn':'kpi-posbox'})
     +'</div>';
-  var ban=(nPend||evSinPend.length)?'<div class="banner warn"><div class="bi">'+ico('warning')+'</div><div class="bt"><b>'+mesLargo(CV.ym).replace('—',CV.ym)+' aún no cuadra</b><span>Revisa '+(nPend?nPend+' ingreso'+(nPend>1?'s':'')+' sin cliente':'')+(nPend&&evSinPend.length?' y ':'')+(evSinPend.length?evSinPend.length+' pago'+(evSinPend.length>1?'s':'')+' de Evolta que no aparecen en el banco':'')+'. Toca cada fila para corregirla.</span></div></div>'
+  var ban=(nPend||evSinPend.length||nConf)?'<div class="banner warn"><div class="bi">'+ico('warning')+'</div><div class="bt"><b>'+mesLargo(CV.ym).replace('—',CV.ym)+' aún no cuadra</b><span>Revisa '+(nPend?nPend+' ingreso'+(nPend>1?'s':'')+' sin cliente':'')+(nPend&&evSinPend.length?' y ':'')+(evSinPend.length?evSinPend.length+' pago'+(evSinPend.length>1?'s':'')+' de Evolta que no aparecen en el banco':'')+(nConf?((nPend||evSinPend.length)?', y ':'')+'confirma '+nConf+' cruce'+(nConf>1?'s':'')+' donde depositó otra persona':'')+'. Toca cada fila para corregirla.</span></div></div>'
     :'<div class="banner pos"><div class="bi">'+ico('check-circle')+'</div><div class="bt"><b>'+(CV.ym.length===4?'Año '+CV.ym:mesLargo(CV.ym))+' cuadrado</b><span>Todo ingreso de clientes tiene cliente y lote, y todo pago de Evolta está en el banco o revisado.</span></div></div>';
   box.innerHTML=pasos+strip+kp+ban+'<div class="grid2">'+estadoResultadosHtml(movsP,links)+ventasPeriodoHtml(enP,links)+'</div><div class="card" id="concDet"></div>';
   Array.prototype.forEach.call(box.querySelectorAll('.mchip'),function(b){b.onclick=function(){CV.ym=b.dataset.ym;renderConc();};});
@@ -2011,6 +2016,7 @@ function destinoConc(m,ix){
 }
 function pillConc(m){var r=CONC.rows[m.sig];
   if(!r)return '<span class="pill ex">'+ico('warning')+'Pendiente</span>';
+  if(porConfirmar(r))return '<span class="pill warn" title="'+esc(r.metodo)+'">'+ico('question')+'Por confirmar</span>';
   var cls=r.tipo==='evolta'?'ok':r.tipo==='manual'?'brand':r.tipo==='desistido'?'warn':'na';
   return '<span class="pill '+cls+'" title="'+esc(r.metodo||'')+'">'+ico(r.tipo==='evolta'?'check':'pencil-simple')+esc(CONC_TIPO[r.tipo])+'</span>';}
 function concTexto(m,d){return [dmy(m.fecha),m.desc,m.mov,String(m.abono),m.cliente,m.lote,(d||[]).map(function(x){return x.cli+' '+x.lote+' '+x.cuota;}).join(' ')].join(' ').toLowerCase();}
@@ -2019,7 +2025,7 @@ function renderConcDet(){
   var ing=ingresosConc().filter(function(m){if(!enP(m.fecha))return false;
     if(CV.tipo==='vc')return esClienteIng(m);if(CV.tipo==='todos')return true;return m.clas===CV.tipo;}).sort(function(a,b){return a.fecha<b.fecha?-1:a.fecha>b.fecha?1:0;});
   var evs=Object.keys(CONC.pagos).map(function(k){return CONC.pagos[k];}).filter(function(p){return enP(p.fecha)&&!links[p.k];}).sort(function(a,b){return a.fecha<b.fecha?-1:1;});
-  function estOK(m){var r=CONC.rows[m.sig];if(CV.est==='pend')return !r;if(CV.est==='ok')return r&&r.tipo==='evolta';if(CV.est==='marc')return r&&r.tipo!=='evolta';return true;}
+  function estOK(m){var r=CONC.rows[m.sig];if(CV.est==='pend')return !r;if(CV.est==='conf')return porConfirmar(r);if(CV.est==='ok')return r&&r.tipo==='evolta'&&!porConfirmar(r);if(CV.est==='marc')return r&&r.tipo!=='evolta';return true;}
   var nB=ing.filter(function(m){return !CONC.rows[m.sig];}).length,nE=evs.filter(function(p){return !p.rev_estado;}).length;
   var h='<div class="card-head"><div><h2 class="card-title">¿De quién es cada ingreso?</h2><div class="card-sub">Toca una fila para '+(READONLY?'ver el detalle':'asignarla o corregirla')+'</div></div>'
     +'<label class="search">'+ico('magnifying-glass')+'<input id="cq" placeholder="Buscar cliente, lote, monto, descripción…" value="'+esc(CV.q)+'"></label></div>'
@@ -2027,8 +2033,8 @@ function renderConcDet(){
   var body='';
   if(CV.lado==='banco'){
     var base=ing.filter(function(m){return !q||concTexto(m,destinoConc(m,ix)).indexOf(q)!==-1;});
-    function ch(k,l){var n=base.filter(function(m){var r=CONC.rows[m.sig];return k==='todos'||(k==='pend'?!r:k==='ok'?r&&r.tipo==='evolta':r&&r.tipo!=='evolta');}).length;return '<button class="chip'+(CV.est===k?' on':'')+'" data-e="'+k+'">'+l+'<span class="c'+(k==='pend'&&n?' red':'')+'">'+n+'</span></button>';}
-    body+='<div class="chips">'+ch('pend','Pendientes')+ch('ok','Conciliados')+ch('marc','Asignados o marcados')+ch('todos','Todos')
+    function ch(k,l){var n=base.filter(function(m){var r=CONC.rows[m.sig];return k==='todos'||(k==='pend'?!r:k==='conf'?porConfirmar(r):k==='ok'?r&&r.tipo==='evolta'&&!porConfirmar(r):r&&r.tipo!=='evolta');}).length;return '<button class="chip'+(CV.est===k?' on':'')+'" data-e="'+k+'">'+l+'<span class="c'+((k==='pend'||k==='conf')&&n?' red':'')+'">'+n+'</span></button>';}
+    body+='<div class="chips">'+ch('pend','Pendientes')+ch('conf','Por confirmar')+ch('ok','Conciliados')+ch('marc','Asignados o marcados')+ch('todos','Todos')
       +'<select id="ctipo" class="chipsel"><option value="vc">Ventas y cobranza</option><option value="VENTAS">Solo ventas</option><option value="COBRANZA">Solo cobranza</option><option value="FINANCIAMIENTO">Financiamiento</option><option value="todos">Todos los ingresos</option></select></div>';
     var lista=base.filter(estOK);
     if(!lista.length)body+=emptyHtml(CV.est==='pend'?'check-circle':'magnifying-glass',CV.est==='pend'?'No hay ingresos pendientes':'No hay ingresos con este filtro',CV.est==='pend'?'Todo el dinero de este periodo tiene cliente asignado.':'');
@@ -2087,6 +2093,7 @@ function abrirConcMov(sig){
   w.innerHTML='<div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="cmT"><div class="cm-head"><div><h3 id="cmT">Ingreso del banco</h3><div class="muted" style="font-size:13px;margin-top:4px">'+dmy(m.fecha)+' · '+esc(m.desc||m.mov)+(m.numOp?' · Op. '+esc(m.numOp):'')+'</div></div><button class="x" id="cmX" aria-label="Cerrar">'+ico('x')+'</button></div>'
     +'<div class="cm-amt"><span class="bigamt pos">'+(u?U(m.abono):S(m.abono))+'</span>'+(u?'<span class="muted">≈ '+S(s)+' (TC '+getTC(ym(m.fecha)).toFixed(3)+')</span>':'')+'<span class="pill neutral">'+esc(clasLabel(m.clas))+'</span>'+pillConc(m)+'</div>'
     +(r&&r.metodo?'<div class="muted3" style="font-size:12px">'+esc(r.metodo)+(r.usuario?' · '+esc(r.usuario):'')+'</div>':'')
+    +(porConfirmar(r)?'<div class="alert warn">'+ico('question')+'<span>El sistema lo cruzó por monto y fecha, pero el depósito viene de otra persona. Si es correcto toca <b>Guardar</b> y queda confirmado; si no, cambia el pago o quita la conciliación.</span></div>':'')
     +((m.cliente||m.lote)?'<div class="alert pos">'+ico('note-pencil')+'<span>En Movimientos anotaste: <b>'+esc([m.cliente,m.lote].filter(Boolean).join(' · '))+'</b></span></div>':'')
     +'<div class="cm-sec"><b>1 · ¿Qué pago de Evolta es?</b><span class="muted" style="font-size:12.5px">Marca uno o varios (si el depósito junta varias cuotas). Arriba están los más parecidos.</span>'
     +'<label class="search" style="max-width:none">'+ico('magnifying-glass')+'<input id="cmQ" placeholder="Buscar en Evolta por cliente, lote, OC o monto…"'+(READONLY?' disabled':'')+'></label><div id="cmList" class="candlist"></div><div id="cmSum" class="cm-sum"></div></div>'
