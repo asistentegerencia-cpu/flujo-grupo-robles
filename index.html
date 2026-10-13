@@ -1837,7 +1837,9 @@ function conciliarAuto(bank,pagos){
     if(b.cliente){var c=0;cToks(b.cliente).forEach(function(t){if(x.tk[t])c++;});if(c>=2)n+=3;else if(c)n+=1;}
     if(b.lote&&x.lt&&cLote(b.lote)===x.lt)n+=3;return n;}
   // Si la administradora ya puso cliente o lote en el movimiento, solo se acepta un pago de ese cliente o lote
-  function pista(x,bb){var b=bb.b;if(!b.cliente&&!b.lote)return true;
+  // Si el que deposita es un cliente conocido de Evolta, solo se cruza con pagos de ese cliente
+  B.forEach(function(bb){var bt=cToks(bb.b.desc);bb.conocido=bt.length>=2&&P.some(function(x){if(cDias(x.p.fecha,bb.b.f)>60)return false;var n=0;bt.forEach(function(t){if(x.tk[t])n++;});return n>=2;});});
+  function pista(x,bb){var b=bb.b;if(bb.conocido&&score(x,bb)===0)return false;if(!b.cliente&&!b.lote)return true;
     if(b.lote&&x.lt&&cLote(b.lote)===x.lt)return true;var c=0;cToks(b.cliente).forEach(function(t){if(x.tk[t])c++;});return c>0;}
   function libre(bb,x){return !bb.m&&(!x||pista(x,bb));}
   function amtOK(x,b,tol){var p=x.p;
