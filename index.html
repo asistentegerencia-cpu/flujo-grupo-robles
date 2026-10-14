@@ -525,6 +525,14 @@ details.concsteps>:last-child{margin-bottom:18px}
 .kv span{font-size:11.5px;font-weight:600;color:var(--gr-text-2)}
 .kv b{font-size:15px}
 .kv em{font-style:normal;font-size:11.5px;color:var(--gr-text-2)}
+.cobref{margin-top:12px;border:1px dashed var(--gr-border);border-radius:12px;padding:10px 12px;background:var(--gr-surface-2)}
+.cobref-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.cobref-h span{font-size:11.5px;color:var(--gr-text-2);flex:1}
+.cobref-r{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--gr-border);font-size:13px}
+.cobref-r span{display:flex;flex-direction:column}
+.cobref-r em{font-style:normal;font-size:11.5px;color:var(--gr-text-2)}
+.cobref-r b{white-space:nowrap;font-variant-numeric:tabular-nums}
+.cobref-r.tot{font-weight:700}
 </style>
 </head>
 <body>
@@ -1992,24 +2000,26 @@ function estadoResultadosHtml(movs,partes){
     t[c]+=x.s;if(gs[c])gs[c][x.g]=1;});
   function n(c,u){var k=Object.keys(gs[c]).length;return k?k+' '+u+(k>1?'s':''):'';}
   var A=sumarAreas(movs,NUCLEO.concat(SEG)).by,ope=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],otros=['DEUDA GG','EVOLUTION','BANCO','DVO','OTROS'];
-  var ingCli=t.nueva+t.anterior+t.cuota+t.sf+t.desist+t.pend,egO=ope.reduce(function(a,k){return a+A[k].eq;},0),egX=otros.reduce(function(a,k){return a+A[k].eq;},0);
+  var cob=t.anterior+t.cuota+t.sf,ingCli=t.nueva+t.desist+t.pend,egO=ope.reduce(function(a,k){return a+A[k].eq;},0),egX=otros.reduce(function(a,k){return a+A[k].eq;},0);
   var rev=movs.filter(function(m){return m.cargo>0&&m.area==='REVISAR';}).reduce(function(a,m){return a+montoPEN(m,true);},0);
   function L(tx,v,cls,sub){return '<tr class="'+(cls||'')+'"><td>'+tx+(sub?'<div class="sub">'+sub+'</div>':'')+'</td><td class="num">'+(v<0?'('+S(-v)+')':S(v))+'</td><td class="num muted3">'+(ingCli?(v/ingCli*100).toFixed(1)+'%':'')+'</td></tr>';}
   var per=CV.ym.length===4?'del año':'del mes';
   return '<div class="card"><div class="card-head"><div><h2 class="card-title">Estado de resultados</h2><div class="card-sub">Base caja · lo que entró y salió del banco · dólares al TC del mes</div></div></div><div class="tablewrap"><table class="table er"><tbody>'
     +L('Ventas nuevas '+per,t.nueva,'',(n('nueva','lote')||'Ningún lote nuevo')+' · separados o vendidos '+(CV.ym.length===4?'en el año':'en el mes'))
-    +L('Inicial de ventas anteriores',t.anterior,'',n('anterior','lote')+(n('anterior','lote')?' · ':'')+'lo que siguen pagando de su inicial')
-    +L('Cuotas de financiamiento',t.cuota,'',n('cuota','cliente')+(n('cuota','cliente')?' · ':'')+'crédito directo: la inicial en cuotas mensuales')
-    +(t.sf?L('Saldo a financiar pagado a la empresa',t.sf,'',n('sf','lote')+' · caso especial: la contracosecha normalmente no entra'):'')
     +(t.desist?L('Separaciones de desistidos',t.desist,'','Lote liberado'):'')
     +(t.pend?L('Sin identificar',t.pend,'','Asígnalos abajo a un cliente y lote'):'')
-    +L('Ingresos de clientes',ingCli,'sum')
+    +L('Ingresos del periodo',ingCli,'sum','Sin cobranza de ventas anteriores (va abajo como referencia)')
     +ope.map(function(k){return A[k].eq?L(esc(areaLabel(k)),-A[k].eq,'ind'):'';}).join('')
     +L('Resultado operativo',ingCli-egO,'sum')
     +otros.map(function(k){return A[k].eq?L(esc(areaLabel(k)),-A[k].eq,'ind'):'';}).join('')
     +(rev?L('Egresos en REVISAR',-rev,'ind','Sin área asignada'):'')
     +L('Resultado del periodo',ingCli-egO-egX-rev,'tot')
     +'</tbody></table></div>'
+    +'<div class="cobref"><div class="cobref-h"><b>Cobranza del periodo</b><span>Referencia · no suma al resultado</span><b class="num">'+S(cob)+'</b></div>'
+    +'<div class="cobref-r"><span>Inicial de ventas anteriores<em>'+(n('anterior','lote')||'—')+' · lo que siguen pagando de su inicial</em></span><b>'+S(t.anterior)+'</b></div>'
+    +'<div class="cobref-r"><span>Cuotas de financiamiento<em>'+(n('cuota','cliente')||'—')+' · crédito directo, la inicial en cuotas</em></span><b>'+S(t.cuota)+'</b></div>'
+    +(t.sf?'<div class="cobref-r"><span>Saldo a financiar pagado a la empresa<em>'+n('sf','lote')+' · caso especial</em></span><b>'+S(t.sf)+'</b></div>':'')
+    +'<div class="cobref-r tot"><span>Total que entró de clientes al banco</span><b>'+S(ingCli+cob)+'</b></div></div>'
     +'<div class="er-aparte"><span>'+ico('info')+'No se cuentan como resultado:</span><span>Financiamiento recibido <b>'+S(t.fin)+'</b></span>'+(t.interno?'<span>Transferencias internas <b>'+S(t.interno)+'</b></span>':'')+'</div>'
     +'<p class="nota">Una venta es <b>nueva</b> si el lote se separó en el periodo (fecha de separación del Flujo de Caja de Evolta; si no está en Evolta, el primer depósito). Los costos fijos ya van repartidos por área.</p></div>';
 }
