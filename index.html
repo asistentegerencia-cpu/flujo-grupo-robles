@@ -533,6 +533,13 @@ details.concsteps>:last-child{margin-bottom:18px}
 .cobref-r em{font-style:normal;font-size:11.5px;color:var(--gr-text-2)}
 .cobref-r b{white-space:nowrap;font-variant-numeric:tabular-nums}
 .cobref-r.tot{font-weight:700}
+.colstack{display:flex;flex-direction:column;gap:20px;min-width:0}
+.table.dist th{font-size:11px}
+.table.dist .pill{font-size:11px;padding:1px 7px}
+.table.dist{font-size:12.5px}
+.table.dist td,.table.dist th{padding-left:6px;padding-right:6px}
+.table.dist td:first-child{white-space:normal;min-width:110px}
+.table.dist td.num{white-space:nowrap}
 </style>
 </head>
 <body>
@@ -2018,7 +2025,8 @@ function estadoResultadosHtml(movs,partes){
     if(r&&r.tipo==='interno'){t.interno+=s;return;}
     if(m.clas==='VENTAS')t.ventas+=s;else if(m.clas==='COBRANZA')t.cob+=s;else t.otros+=s;});
   var LV=lotesVentas(partes),nl=LV.ls.length;
-  var A=sumarAreas(movs,NUCLEO.concat(SEG)).by,ope=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],otros=['DEUDA GG','EVOLUTION','BANCO','DVO','OTROS'];
+  var A=sumarAreas(movs,NUCLEO.concat(SEG)).by,ope=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],otros=['BANCO','DVO','OTROS'];
+  var cap=A['DEUDA GG'].eq,evo=A['EVOLUTION'].eq,ingCli=t.ventas+t.cob+t.otros;
   var ing=t.ventas+t.otros,egO=ope.reduce(function(a,k){return a+A[k].eq;},0),egX=otros.reduce(function(a,k){return a+A[k].eq;},0);
   var rev=movs.filter(function(m){return m.cargo>0&&m.area==='REVISAR';}).reduce(function(a,m){return a+montoPEN(m,true);},0);
   function L(tx,v,cls,sub){return '<tr class="'+(cls||'')+'"><td>'+tx+(sub?'<div class="sub">'+sub+'</div>':'')+'</td><td class="num">'+(v<0?'('+S(-v)+')':S(v))+'</td><td class="num muted3">'+(ing?(v/ing*100).toFixed(1)+'%':'')+'</td></tr>';}
@@ -2030,12 +2038,37 @@ function estadoResultadosHtml(movs,partes){
     +L('Resultado operativo',ing-egO,'sum')
     +otros.map(function(k){return A[k].eq?L(esc(areaLabel(k)),-A[k].eq,'ind'):'';}).join('')
     +(rev?L('Egresos en REVISAR',-rev,'ind','Sin área asignada'):'')
-    +L('Resultado del periodo',ing-egO-egX-rev,'tot')
+    +L('Resultado de la empresa',ing-egO-egX-rev,'tot','Antes de capitalización · Evolution va aparte')
     +'</tbody></table></div>'
     +'<div class="cobref"><div class="cobref-h"><b>Cobranza del periodo</b><span>Referencia · no suma al resultado</span><b class="num">'+S(t.cob)+'</b></div>'
     +'<div class="cobref-r tot"><span>Total que entró de clientes al banco<em>ventas + cobranza'+(t.otros?' + sin clasificar':'')+'</em></span><b>'+S(ing+t.cob)+'</b></div></div>'
-    +'<div class="er-aparte"><span>'+ico('info')+'No se cuentan como resultado:</span><span>Financiamiento recibido <b>'+S(t.fin)+'</b></span>'+(t.interno?'<span>Transferencias internas <b>'+S(t.interno)+'</b></span>':'')+'</div>'
-    +'<p class="nota">Ventas y cobranza salen de cómo está clasificado cada ingreso en el banco. El precio por m² es lo que entró en el periodo entre los m² del lote. Los costos fijos ya van repartidos por área.</p></div>';
+    +'<div class="cobref"><div class="cobref-h"><b>Aparte</b><span>No suma al resultado de la empresa</span></div>'
+    +'<div class="cobref-r"><span>Capitalización Dirección<em>'+(ingCli?(cap/ingCli*100).toFixed(1):'0')+'% de lo que entró de clientes · meta '+RECOM['DEUDA GG']+'%</em></span><b>'+S(cap)+'</b></div>'
+    +(evo?'<div class="cobref-r"><span>Evolution<em>entidad aparte · su parte de los costos fijos</em></span><b>'+S(evo)+'</b></div>':'')
+    +'<div class="cobref-r"><span>Financiamiento recibido<em>préstamos y compra de dólares</em></span><b>'+S(t.fin)+'</b></div>'
+    +(t.interno?'<div class="cobref-r"><span>Transferencias internas</span><b>'+S(t.interno)+'</b></div>':'')
+    +'</div>'
+    +'<p class="nota">Ventas y cobranza salen de cómo está clasificado cada ingreso en el banco. El precio por m² es lo que entró en el periodo entre los m² del lote. Capitalización Dirección y Evolution van aparte. Los costos fijos ya van repartidos por área.</p></div>';
+}
+// Distribución de lo que entró de clientes: 50% capitalización y 50% áreas, con el % recomendado de cada área
+function distribucionHtml(movs){
+  var ingCli=0;movs.forEach(function(m){if(m.abono>0&&m.clas!=='FINANCIAMIENTO'&&!(CONC.rows[m.sig]&&CONC.rows[m.sig].tipo==='interno'))ingCli+=solesDe(m);});
+  var A=sumarAreas(movs,NUCLEO.concat(SEG)).by,ot=A['BANCO'].eq+A['DVO'].eq+A['OTROS'].eq,usado=0;
+  function fila(nom,v,rec,cls){var pct=ingCli?v/ingCli*100:0;usado+=v;var st=rec==null?'':pct>rec+0.05?'<span class="pill ex">+'+(pct-rec).toFixed(1)+' pts</span>':'<span class="pill ok">'+ico('check')+'</span>';
+    return '<tr class="'+(cls||'')+'"><td>'+nom+'</td><td class="num">'+S(v)+'</td><td class="num"><b>'+pct.toFixed(1)+'%</b></td><td class="num muted">'+(rec==null?'—':rec+'%')+'</td><td class="num">'+st+'</td></tr>';}
+  var areas=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],recA=areas.reduce(function(a,k){return a+RECOM[k];},0),gA=areas.reduce(function(a,k){return a+A[k].eq;},0);
+  var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución del ingreso</h2><div class="card-sub">De '+S(ingCli)+' que entraron de clientes (ventas + cobranza) · % recomendado de Movimientos</div></div></div>'
+    +'<div class="tablewrap"><table class="table er dist"><thead><tr><th></th><th class="num">Gastado</th><th class="num">% del ingreso</th><th class="num">Recom.</th><th></th></tr></thead><tbody>'
+    +fila('Capitalización Dirección',A['DEUDA GG'].eq,RECOM['DEUDA GG'],'sum');
+  var u0=usado;
+  h+=areas.map(function(k){return fila(esc(areaLabel(k)),A[k].eq,RECOM[k],'ind');}).join('');
+  usado=u0+gA;
+  var pg=ingCli?gA/ingCli*100:0;
+  h+='<tr class="sum"><td>Áreas</td><td class="num">'+S(gA)+'</td><td class="num"><b>'+pg.toFixed(1)+'%</b></td><td class="num muted">'+recA+'%</td><td class="num">'+(pg>recA+0.05?'<span class="pill ex">+'+(pg-recA).toFixed(1)+' pts</span>':'<span class="pill ok">'+ico('check')+'</span>')+'</td></tr>'
+    +fila('Banco, cambio y otros',ot,null,'ind')
+    +'<tr class="tot"><td>Queda sin usar</td><td class="num">'+S(ingCli-usado)+'</td><td class="num"><b>'+(ingCli?((ingCli-usado)/ingCli*100).toFixed(1):'0')+'%</b></td><td></td><td></td></tr>'
+    +'</tbody></table></div><p class="nota">Lo que entra de clientes se reparte 50% a capitalización y 50% a las áreas. Una etiqueta roja indica que el área gastó más de su % recomendado.</p></div>';
+  return h;
 }
 // Lotes del mes: los lotes con dinero de VENTAS en el banco; Evolta solo aporta m², precio e inicial pactada
 function lotesMesHtml(partes){
@@ -2081,7 +2114,7 @@ function desistidosPeriodo(enP){
 // Indicadores de ventas del periodo, guiados por el dinero del banco
 function erVentasHtml(movs,partes){
   var enP=periodoConc(),LV=lotesVentas(partes),des=desistidosPeriodo(enP),fin={};
-  var A=sumarAreas(movs,NUCLEO).by,gV=A['VENTAS'].eq,gM=A['MKT'].eq,n=LV.ls.length,T=LV.T;
+  var A=sumarAreas(movs,NUCLEO).by,gV=A['VENTAS'].eq,gM=A['MKT'].eq,n=LV.ls.length,T=LV.T,nc=contratosPeriodo(enP).length;
   LV.ls.forEach(function(g){var c=g.c;var t=!c?'Sin contrato':/HIPOTEC/i.test(c.tipo_fin)?'Hipotecario':/DIRECTO/i.test(c.tipo_fin)?'Directo':(c.tipo_fin||'Otro');fin[t]=(fin[t]||0)+1;});
   var pagoDes={};partes.forEach(function(x){if(x.c)String(x.c.lotes).split(' + ').forEach(function(l){var k=cLoteKey(x.c.etapa,l);pagoDes[k]=(pagoDes[k]||0)+x.s;});});
   var top=LV.ls.slice().filter(function(g){return g.pm2!=null;}).sort(function(a,b){return b.pm2-a.pm2;});
@@ -2091,7 +2124,7 @@ function erVentasHtml(movs,partes){
     +'<div><span>Ventas en el banco</span><b>'+S(T.mes+LV.sinLote)+'</b><em>'+n+' lote'+(n!==1?'s':'')+(T.m2?' · '+m2t(T.m2):'')+'</em></div>'
     +'<div><span>Precio por m² (lo que entró)</span><b>'+(T.m2?S(T.m2con/T.m2):'—')+'</b><em>'+(top.length?'de '+S(top[top.length-1].pm2)+' a '+S(top[0].pm2)+' según el lote':'')+'</em></div>'
     +'<div><span>Promedio por lote</span><b>'+(n?S(T.mes/n):'—')+'</b><em>lo que entró por cada lote</em></div>'
-    +'<div><span>Costo de vender (Ventas + Mkt)</span><b>'+(n?S((gV+gM)/n):'—')+'</b><em>por lote · '+((T.mes+LV.sinLote)?((gV+gM)/(T.mes+LV.sinLote)*100).toFixed(1):'0')+'% de las ventas</em></div>'
+    +'<div><span>Costo de vender (Ventas + Mkt)</span><b>'+(nc?S((gV+gM)/nc):'—')+'</b><em>por contrato nuevo ('+nc+') · '+((T.mes+LV.sinLote)?((gV+gM)/(T.mes+LV.sinLote)*100).toFixed(1):'0')+'% de las ventas del banco</em></div>'
     +'<div><span>Desistimientos</span><b>'+des.length+'</b><em>'+(des.length?des.map(function(d){var k=cLoteKey(d.v.etapa,d.v.lote);return esc(d.v.lote)+' '+esc(String(d.v.titular||'').split(' ').slice(0,2).join(' '))+' · '+m2t(d.m2)+' · '+(pagoDes[k]?'pagó '+S(pagoDes[k]):'no pagó nada');}).join('; '):'ninguno en el periodo')+'</em></div>'
     +'<div><span>Forma de pago</span><b>'+(Object.keys(fin).map(function(k){return fin[k]+' '+k.toLowerCase();}).join(' · ')||'—')+'</b><em>lotes con ventas en el periodo</em></div>'
     +'</div>'
@@ -2183,7 +2216,7 @@ function renderConc(){
     +'</div>';
   var ban=(nDob?'<div class="banner neg"><div class="bi">'+ico('copy')+'</div><div class="bt"><b>'+nDob+' ingreso'+(nDob>1?'s usan':' usa')+' un pago de Evolta que ya se usó en otro depósito</b><span>El mismo pago no puede justificar dos depósitos. Filtra por <a href="#" id="verDob">Pago usado dos veces</a> y corrige a qué cliente o cuota corresponde.</span></div></div>':'')+((nPend||evSinPend.length||nConf||nDob)?'<div class="banner warn"><div class="bi">'+ico('warning')+'</div><div class="bt"><b>'+mesLargo(CV.ym).replace('—',CV.ym)+' aún no cuadra</b><span>Revisa '+(nPend?nPend+' ingreso'+(nPend>1?'s':'')+' sin cliente':'')+(nPend&&evSinPend.length?' y ':'')+(evSinPend.length?evSinPend.length+' pago'+(evSinPend.length>1?'s':'')+' de Evolta que no aparecen en el banco':'')+(nConf?((nPend||evSinPend.length)?', y ':'')+'confirma '+nConf+' cruce'+(nConf>1?'s':'')+' donde depositó otra persona':'')+(nDob&&!nPend&&!evSinPend.length&&!nConf?'el pago de Evolta usado dos veces':'')+'. Toca cada fila para corregirla.</span></div></div>'
     :'<div class="banner pos"><div class="bi">'+ico('check-circle')+'</div><div class="bt"><b>'+(CV.ym.length===4?'Año '+CV.ym:mesLargo(CV.ym))+' cuadrado</b><span>Todo ingreso de clientes tiene cliente y lote, y todo pago de Evolta está en el banco o revisado.</span></div></div>');
-  box.innerHTML=pasos+strip+kp+ban+'<div class="grid2">'+estadoResultadosHtml(movsP,partes)+erVentasHtml(movsP,partes)+'</div><div class="grid-er">'+lotesMesHtml(partes)+carteraHtml()+'</div><div class="card" id="concDet"></div>';
+  box.innerHTML=pasos+strip+kp+ban+'<div class="grid2">'+estadoResultadosHtml(movsP,partes)+'<div class="colstack">'+erVentasHtml(movsP,partes)+distribucionHtml(movsP)+'</div></div><div class="grid-er">'+lotesMesHtml(partes)+carteraHtml()+'</div><div class="card" id="concDet"></div>';
   Array.prototype.forEach.call(box.querySelectorAll('.mchip'),function(b){b.onclick=function(){CV.ym=b.dataset.ym;renderConc();};});
   var dp=$('concPasos');dp.ontoggle=function(){CV.pasos=dp.open;};
   var go=box.querySelector('[data-go]');if(go)go.onclick=function(e){e.preventDefault();irA('cargar');};
