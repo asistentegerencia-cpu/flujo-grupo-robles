@@ -520,6 +520,11 @@ details.concsteps>:last-child{margin-bottom:18px}
 .lotesmes .track.avance .fill{background:var(--gr-pos)}
 .banner.neg{background:var(--gr-neg-bg);border:1px solid var(--gr-neg);color:var(--gr-text)}
 .banner.neg .bi{color:var(--gr-neg-ink)}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:12px}
+.kv>div{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:12px;background:var(--gr-surface-2);border:1px solid var(--gr-border)}
+.kv span{font-size:11.5px;font-weight:600;color:var(--gr-text-2)}
+.kv b{font-size:15px}
+.kv em{font-style:normal;font-size:11.5px;color:var(--gr-text-2)}
 </style>
 </head>
 <body>
@@ -2043,6 +2048,61 @@ function lotesMesHtml(partes){
     +'<p class="nota">El saldo a financiar (contracosecha o crédito) va aparte: no se cuenta como falta. Con S/ 10,000 o más pagados se considera venta aunque Evolta no tenga la minuta. Si lo cobrado en el banco no coincide con Evolta, se muestra en rojo.</p></div>';
   return h;
 }
+// Contratos separados o vendidos en el periodo (base de "ventas del mes")
+function contratosPeriodo(enP){return CONC.contratos.filter(function(c){return enP(inicioContrato(c));});}
+function stockDeContrato(c){return String(c.lotes||'').split(' + ').map(function(l){return CONC.stock[cLoteKey(c.etapa,l)];}).filter(Boolean);}
+// Desistimientos: OC devueltas en el periodo cuyo lote ya no tiene contrato vigente (no cuenta re-emisiones de la OC)
+function desistidosPeriodo(enP){
+  var ix=indiceContratos(),vistos={};
+  return CONC.ventas.filter(function(v){if(!v.fecha_dev||!enP(v.fecha_dev)||v.estado_oc==='Activo')return false;
+    var k=cLoteKey(v.etapa,v.lote);if(vistos[k]||ix.key[k])return false;vistos[k]=1;return true;})
+    .map(function(v){var st=CONC.stock[cLoteKey(v.etapa,v.lote)];return {v:v,m2:v.m2||(st&&st.m2)||0,precio:v.precio||0};});
+}
+// Estado de resultados por ventas del periodo: lo vendido (aunque no se haya cobrado todo) menos los gastos del periodo
+function erVentasHtml(movs){
+  var enP=periodoConc(),cs=contratosPeriodo(enP),des=desistidosPeriodo(enP);
+  var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Estado de resultados por ventas</h2><div class="card-sub">Lo vendido en el periodo según Evolta, aunque aún no se cobre todo</div></div></div>';
+  if(!CONC.contratos.length)return h+emptyHtml('file-xls','Sube el Reporte de Flujo de Caja de Evolta','')+'</div>';
+  var V={precio:0,m2:0,lotes:0,lista:0,ci:0,sf:0},fin={};
+  cs.forEach(function(c){var st=stockDeContrato(c);V.precio+=c.precio||0;V.ci+=c.ci_total||0;V.sf+=c.sf_total||0;V.lotes+=String(c.lotes).split(' + ').length;
+    V.m2+=st.reduce(function(a,x){return a+(x.m2||0);},0);V.lista+=Math.max(c.precio||0,st.reduce(function(a,x){return a+(x.lista||x.precio||0);},0));
+    var t=/HIPOTEC/i.test(c.tipo_fin)?'Hipotecario':/DIRECTO/i.test(c.tipo_fin)?'Directo':(c.tipo_fin||'Otro');fin[t]=(fin[t]||0)+1;});
+  var D={precio:0,m2:0};des.forEach(function(d){D.precio+=d.precio;D.m2+=d.m2;});
+  var A=sumarAreas(movs,NUCLEO).by,gV=A['VENTAS'].eq,gM=A['MKT'].eq,gO=A['OPE Planta'].eq+A['OPE Infra'].eq+A['OPE Comex'].eq,gA=A['ADM'].eq;
+  var neto=V.precio-D.precio,res=neto-gV-gM-gO-gA,desc=V.lista-V.precio,n=cs.length;
+  function L(tx,v,cls,sub){return '<tr class="'+(cls||'')+'"><td>'+tx+(sub?'<div class="sub">'+sub+'</div>':'')+'</td><td class="num">'+(v<0?'('+S(-v)+')':S(v))+'</td><td class="num muted3">'+(V.precio?(v/V.precio*100).toFixed(1)+'%':'')+'</td></tr>';}
+  function m2t(x){return nf(x).replace(/\.00$/,'')+' m²';}
+  h+='<div class="tablewrap"><table class="table er"><tbody>'
+    +L('Ventas brutas',V.precio,'',n+' contrato'+(n!==1?'s':'')+' · '+V.lotes+' lote'+(V.lotes!==1?'s':'')+' · '+m2t(V.m2))
+    +L('Desistimientos',-D.precio,'',des.length?des.map(function(d){return esc(d.v.lote)+' '+esc(String(d.v.titular||'').split(' ').slice(0,2).join(' '))+' · '+m2t(d.m2);}).join(', '):'Ninguno en el periodo')
+    +L('Ventas netas',neto,'sum',m2t(V.m2-D.m2))
+    +L('Ventas (asesores y comisiones)',-gV,'ind')+L('Marketing',-gM,'ind')+L('Operación (Planta, Infra, Comex)',-gO,'ind')+L('Administración',-gA,'ind')
+    +L('Resultado por ventas',res,'tot')
+    +'</tbody></table></div>'
+    +'<div class="kv">'
+    +'<div><span>Precio por m²</span><b>'+(V.m2?S(V.precio/V.m2):'—')+'</b><em>lote promedio '+(V.lotes?S(V.precio/V.lotes):'—')+'</em></div>'
+    +'<div><span>Descuentos sobre lista</span><b>'+S(desc)+'</b><em>'+(V.lista?(desc/V.lista*100).toFixed(1):'0')+'% del precio de lista</em></div>'
+    +'<div><span>Costo de vender (Ventas + Mkt)</span><b>'+(n?S((gV+gM)/n):'—')+'</b><em>por contrato · '+(V.precio?((gV+gM)/V.precio*100).toFixed(1):'0')+'% de lo vendido</em></div>'
+    +'<div><span>Inicial pactada</span><b>'+S(V.ci)+'</b><em>'+(V.precio?(V.ci/V.precio*100).toFixed(1):'0')+'% del precio · saldo a financiar '+S(V.sf)+'</em></div>'
+    +'<div><span>Forma de pago</span><b>'+(Object.keys(fin).map(function(k){return fin[k]+' '+k.toLowerCase();}).join(' · ')||'—')+'</b><em>contratos del periodo</em></div>'
+    +'</div>'
+    +'<p class="nota">El precio del lote es lo registrado en Evolta; el precio por m² sale de dividirlo entre los m² del Reporte de Stock. Un desistimiento es una OC devuelta cuyo lote quedó libre (las re-emisiones de OC no cuentan).</p></div>';
+  return h;
+}
+// Cartera de todos los contratos e inventario disponible (foto a hoy)
+function carteraHtml(){
+  if(!CONC.contratos.length)return '';
+  var C={precio:0,pagado:0,ini:0,nIni:0,sf:0},I={n:0,m2:0,valor:0},sep=0;
+  CONC.contratos.forEach(function(c){C.precio+=c.precio||0;C.pagado+=c.pagado||0;var pi=Math.max(0,(c.ci_total||0)-(c.ci_cobrada||0));if(pi>1){C.ini+=pi;C.nIni++;}C.sf+=Math.max(0,(c.sf_total||0)-(c.sf_cobrada||0));});
+  Object.keys(CONC.stock).forEach(function(k){var x=CONC.stock[k],e=cNorm(x.estado);if(e==='DISPONIBLE'){I.n++;I.m2+=x.m2||0;I.valor+=(x.moneda==='USD'?(x.precio||0)*getTC(ym(new Date().toISOString())):(x.precio||0));}else if(/SEPARACION/.test(e))sep++;});
+  return '<div class="card"><div class="card-head"><div><h2 class="card-title">Cartera e inventario</h2><div class="card-sub">Foto a hoy · todos los contratos del Flujo de Caja y el Stock de Evolta</div></div></div>'
+    +'<div class="kv">'
+    +'<div><span>Vendido · '+CONC.contratos.length+' contratos</span><b>'+S(C.precio)+'</b><em>cobrado '+S(C.pagado)+' ('+(C.precio?(C.pagado/C.precio*100).toFixed(0):0)+'%)</em></div>'
+    +'<div><span>Por cobrar</span><b>'+S(C.precio-C.pagado)+'</b><em>inicial pendiente '+S(C.ini)+' de '+C.nIni+' clientes</em></div>'
+    +'<div><span>Saldo a financiar pendiente</span><b>'+S(C.sf)+'</b><em>contracosecha y crédito</em></div>'
+    +'<div><span>Lotes disponibles</span><b>'+I.n+'</b><em>'+nf(I.m2).replace(/\.00$/,'')+' m² · lista '+S(I.valor)+(sep?' · '+sep+' en separación':'')+'</em></div>'
+    +'</div></div>';
+}
 
 // ============ Conciliación: datos ============
 var CONC={ok:false,pagos:{},ventas:[],contratos:[],stock:{},rows:{},cargado:''};
@@ -2115,7 +2175,7 @@ function renderConc(){
     +'</div>';
   var ban=(nDob?'<div class="banner neg"><div class="bi">'+ico('copy')+'</div><div class="bt"><b>'+nDob+' ingreso'+(nDob>1?'s usan':' usa')+' un pago de Evolta que ya se usó en otro depósito</b><span>El mismo pago no puede justificar dos depósitos. Filtra por <a href="#" id="verDob">Pago usado dos veces</a> y corrige a qué cliente o cuota corresponde.</span></div></div>':'')+((nPend||evSinPend.length||nConf||nDob)?'<div class="banner warn"><div class="bi">'+ico('warning')+'</div><div class="bt"><b>'+mesLargo(CV.ym).replace('—',CV.ym)+' aún no cuadra</b><span>Revisa '+(nPend?nPend+' ingreso'+(nPend>1?'s':'')+' sin cliente':'')+(nPend&&evSinPend.length?' y ':'')+(evSinPend.length?evSinPend.length+' pago'+(evSinPend.length>1?'s':'')+' de Evolta que no aparecen en el banco':'')+(nConf?((nPend||evSinPend.length)?', y ':'')+'confirma '+nConf+' cruce'+(nConf>1?'s':'')+' donde depositó otra persona':'')+(nDob&&!nPend&&!evSinPend.length&&!nConf?'el pago de Evolta usado dos veces':'')+'. Toca cada fila para corregirla.</span></div></div>'
     :'<div class="banner pos"><div class="bi">'+ico('check-circle')+'</div><div class="bt"><b>'+(CV.ym.length===4?'Año '+CV.ym:mesLargo(CV.ym))+' cuadrado</b><span>Todo ingreso de clientes tiene cliente y lote, y todo pago de Evolta está en el banco o revisado.</span></div></div>');
-  box.innerHTML=pasos+strip+kp+ban+'<div class="grid-er">'+estadoResultadosHtml(movsP,partes)+lotesMesHtml(partes)+'</div><div class="card" id="concDet"></div>';
+  box.innerHTML=pasos+strip+kp+ban+'<div class="grid2">'+estadoResultadosHtml(movsP,partes)+erVentasHtml(movsP)+'</div><div class="grid-er">'+lotesMesHtml(partes)+carteraHtml()+'</div><div class="card" id="concDet"></div>';
   Array.prototype.forEach.call(box.querySelectorAll('.mchip'),function(b){b.onclick=function(){CV.ym=b.dataset.ym;renderConc();};});
   var dp=$('concPasos');dp.ontoggle=function(){CV.pasos=dp.open;};
   var go=box.querySelector('[data-go]');if(go)go.onclick=function(e){e.preventDefault();irA('cargar');};
