@@ -95,3 +95,6 @@ create policy "evolta_stock editor all" on public.evolta_stock for all to authen
 
 -- Inicial pactada (separación + cuota inicial) y monto a financiar de cada OC, del Reporte de Ventas
 alter table public.evolta_ventas add column if not exists inicial numeric, add column if not exists financiar numeric;
+
+-- Cambio de moneda (compra/venta de dólares): área que lo pidió y grupo que une la salida, la entrada y los pagos hechos con esa moneda
+alter table public.movimientos add column if not exists cambio_area text, add column if not exists cambio_grupo text;

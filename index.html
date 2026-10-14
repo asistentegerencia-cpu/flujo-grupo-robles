@@ -540,6 +540,17 @@ details.concsteps>:last-child{margin-bottom:18px}
 .table.dist td,.table.dist th{padding-left:6px;padding-right:6px}
 .table.dist td:first-child{white-space:normal;min-width:110px}
 .table.dist td.num{white-space:nowrap}
+/* Cambio de moneda */
+.cmhist{border:1px solid var(--gr-border);border-radius:12px;padding:10px 12px;background:var(--gr-surface-2);display:flex;flex-direction:column;gap:8px}
+.cmhist-h{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.cmhist ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;counter-reset:p}
+.cmhist li{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:start;font-size:12.5px;padding:6px 8px;border-radius:8px;counter-increment:p}
+.cmhist li.on{background:var(--gr-surface);box-shadow:inset 0 0 0 1px #14b8a6}
+.cmhist li .d{color:var(--gr-text-2);white-space:nowrap}
+.cmhist li .t{display:flex;flex-direction:column}
+.cmhist li em{font-style:normal;color:var(--gr-text-2);font-size:11.5px}
+.cmhist li b{white-space:nowrap;font-variant-numeric:tabular-nums}
+.cmhist-f{font-size:12px;color:var(--gr-text-2)}
 </style>
 </head>
 <body>
@@ -669,7 +680,7 @@ var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI
 var sb=supabase.createClient(SB_URL,SB_KEY);
 var DB={movs:{},saldos:{},asesores:[],metas:{},metasPersonal:{}}, ROL='viewer', USUARIO=null, READONLY=true;
 // columnas nuevas (se detectan al cargar, para no romper si aún no existen en la BD)
-var HAS_REPARTO=false, HAS_TC=false;
+var HAS_REPARTO=false, HAS_TC=false, HAS_CAMBIO=false;
 
 // ============ Config ============
 var TC={1:3.47,2:3.47,3:3.47,4:3.45,5:3.42,6:3.40,7:3.42,8:3.47,9:3.47,10:3.47,11:3.47,12:3.47};
@@ -677,18 +688,18 @@ var MESES=['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SE
 var NUCLEO=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'];
 var SEG=['BANCO','DVO','OTROS','EVOLUTION'];
 var RECOM={'DEUDA GG':50,'OPE Planta':7,'OPE Infra':20,'OPE Comex':3,'VENTAS':5,'MKT':5,'ADM':10};
-var AREAS=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM','BANCO','DVO','OTROS','EVOLUTION','INGRESO','REVISAR'];
+var AREAS=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM','BANCO','DVO','OTROS','EVOLUTION','CAMBIO','INGRESO','REVISAR'];
 // 'DEUDA GG' es la clave guardada en la BD; en pantalla se muestra con su nombre nuevo
-var AREA_LABEL={'DEUDA GG':'CAPITALIZACIÓN DIRECCIÓN','EVOLUTION':'Evolution (entidad aparte)','BANCO':'Banco (ITF)','DVO':'Diferencia de cambio','OTROS':'Otros'};
+var AREA_LABEL={'CAMBIO':'Cambio de moneda','DEUDA GG':'CAPITALIZACIÓN DIRECCIÓN','EVOLUTION':'Evolution (entidad aparte)','BANCO':'Banco (ITF)','DVO':'Diferencia de cambio','OTROS':'Otros'};
 function areaLabel(a){return AREA_LABEL[a]||a;}
-var AREA_COLOR={'DEUDA GG':'#f87171','OPE Planta':'#34d399','OPE Infra':'#22d3ee','OPE Comex':'#a78bfa','VENTAS':'#fbbf24','MKT':'#f472b6','ADM':'#60a5fa','BANCO':'#94a3b8','DVO':'#c084fc','OTROS':'#64748b','EVOLUTION':'#fb923c','INGRESO':'#22c55e','REVISAR':'#f87171'};
+var AREA_COLOR={'DEUDA GG':'#f87171','OPE Planta':'#34d399','OPE Infra':'#22d3ee','OPE Comex':'#a78bfa','VENTAS':'#fbbf24','MKT':'#f472b6','ADM':'#60a5fa','BANCO':'#94a3b8','DVO':'#c084fc','OTROS':'#64748b','EVOLUTION':'#fb923c','CAMBIO':'#14b8a6','INGRESO':'#22c55e','REVISAR':'#f87171'};
 // Clasificación de ingresos, INDEPENDIENTE del Área (que solo clasifica egresos del núcleo/seguimiento)
-var CLAS_LABEL={'':'—','VENTAS':'Ventas','COBRANZA':'Cobranza','FINANCIAMIENTO':'Financiamiento (préstamo/socios)'};
+var CLAS_LABEL={'':'—','VENTAS':'Ventas','COBRANZA':'Cobranza','FINANCIAMIENTO':'Financiamiento (préstamo/socios)','CAMBIO':'Cambio de moneda (compra/venta de dólares)'};
 function clasLabel(c){return CLAS_LABEL[c||'']||c;}
 var CONCEPTOS_COBRANZA=['Cuota Inicial','Separación','Saldo'];
 var CONCEPTOS_VENTAS=['Cuotas de financiamiento','Inicial','Financiamiento de la inicial'];
 var PROYECTOS=['Palta','Pitahaya'];
-var REGLAS=[['ITF','BANCO'],['N/D I-BANC','BANCO'],['N/D MEGA','BANCO'],['N/D AUTORIZADA','BANCO'],['COMISION','BANCO'],['MANTENIMIENTO','BANCO'],['PORTES','BANCO'],['I-BANC + COM','BANCO'],['BAYAS Y FRUTOS','OPE Planta'],['PAJUELO ESPINO','OPE Planta'],['ENTEL','ADM'],['PAGO DE SERVICIOS','ADM'],['GRUPO INMOBILIARIO ROBLES','DEUDA GG'],['ROBLES NU','DEUDA GG'],['IZIPAY','INGRESO'],['DEP.EFECTIVO','INGRESO'],['EVOLUTION EMBOLSOS','INGRESO']];
+var REGLAS=[['MUVEX','CAMBIO'],['COMPRA DE DOLARES','CAMBIO'],['VENTA DOLARES','CAMBIO'],['ITF','BANCO'],['N/D I-BANC','BANCO'],['N/D MEGA','BANCO'],['N/D AUTORIZADA','BANCO'],['COMISION','BANCO'],['MANTENIMIENTO','BANCO'],['PORTES','BANCO'],['I-BANC + COM','BANCO'],['BAYAS Y FRUTOS','OPE Planta'],['PAJUELO ESPINO','OPE Planta'],['ENTEL','ADM'],['PAGO DE SERVICIOS','ADM'],['GRUPO INMOBILIARIO ROBLES','DEUDA GG'],['ROBLES NU','DEUDA GG'],['IZIPAY','INGRESO'],['DEP.EFECTIVO','INGRESO'],['EVOLUTION EMBOLSOS','INGRESO']];
 // Tipo de cambio del mes: el guardado en la nube manda; si no hay, el valor por defecto de TC
 function getTC(ymStr){var s=DB.saldos[ymStr];if(s&&s.tc)return s.tc;return TC[+ymStr.slice(5,7)]||3.47;}
 // ============ Costos fijos: cuadro de colaboradores ============
@@ -755,8 +766,8 @@ function sigOf(m){return m.sig||[m.fecha,m.mov,m.desc,m.cargo,m.abono,m.saldoCon
 function baseKey(m){return [m.fecha,m.mov,m.desc,m.cargo,m.abono,m.moneda].join('|');}
 
 // ============ Data layer (Supabase) ============
-function rowToMov(r){return {sig:r.sig,fecha:r.fecha,mov:r.mov||'',desc:r.descripcion||'',numOp:r.numero_operacion||'',moneda:r.moneda,cargo:+r.cargo||0,abono:+r.abono||0,saldoCont:r.saldo_cont!=null?+r.saldo_cont:'',tc:r.tc!=null?+r.tc:null,area:r.area,obs:r.obs||'',asesor:r.asesor||'',clas:r.clasificacion||'',cliente:r.cliente||'',lote:r.lote||'',m2:r.m2!=null?+r.m2:'',concepto:r.concepto||'',cuota:r.cuota||'',metodoPago:r.metodo_pago||'',personal:r.personal||'',esFijo:!!r.es_fijo,proyecto:r.proyecto||'',reparto:r.reparto||''};}
-function movToRow(m){var row={sig:sigOf(m),fecha:m.fecha,mov:m.mov,descripcion:m.desc,numero_operacion:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldo_cont:(m.saldoCont===''||m.saldoCont==null)?null:m.saldoCont,tc:m.tc,area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)row.reparto=m.reparto||'';return row;}
+function rowToMov(r){return {sig:r.sig,fecha:r.fecha,mov:r.mov||'',desc:r.descripcion||'',numOp:r.numero_operacion||'',moneda:r.moneda,cargo:+r.cargo||0,abono:+r.abono||0,saldoCont:r.saldo_cont!=null?+r.saldo_cont:'',tc:r.tc!=null?+r.tc:null,area:r.area,obs:r.obs||'',asesor:r.asesor||'',clas:r.clasificacion||'',cliente:r.cliente||'',lote:r.lote||'',m2:r.m2!=null?+r.m2:'',concepto:r.concepto||'',cuota:r.cuota||'',metodoPago:r.metodo_pago||'',personal:r.personal||'',esFijo:!!r.es_fijo,proyecto:r.proyecto||'',reparto:r.reparto||'',cambioArea:r.cambio_area||'',cambioGrupo:r.cambio_grupo||''};}
+function movToRow(m){var row={sig:sigOf(m),fecha:m.fecha,mov:m.mov,descripcion:m.desc,numero_operacion:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldo_cont:(m.saldoCont===''||m.saldoCont==null)?null:m.saldoCont,tc:m.tc,area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)row.reparto=m.reparto||'';if(HAS_CAMBIO){row.cambio_area=m.cambioArea||null;row.cambio_grupo=m.cambioGrupo||null;}return row;}
 async function cargarNube(){
   setSync('cargando…');
   DB.movs={}; var desde=0, tam=1000, total=0;
@@ -769,6 +780,7 @@ async function cargarNube(){
     desde+=tam;
   }
   var t1=await sb.from('movimientos').select('reparto').limit(1); HAS_REPARTO=!t1.error;
+  var t3=await sb.from('movimientos').select('cambio_grupo').limit(1); HAS_CAMBIO=!t3.error;
   var t2=await sb.from('saldos').select('tc').limit(1); HAS_TC=!t2.error;
   var sl=await sb.from('saldos').select('*');
   if(sl.error) throw sl.error;
@@ -807,7 +819,7 @@ async function guardarMetasPersonalBatch(ymStr,filas){
 }
 async function upsertMovs(list){ if(!list.length)return null; setSync('guardando…'); var r=await sb.from('movimientos').upsert(list.map(movToRow),{onConflict:'sig',ignoreDuplicates:true}); setSync(r.error?('error: '+r.error.message):'guardado ✓'); return r.error||null; }
 var obsTimers={};
-async function updateMov(m){ setSync('guardando…'); var patch={area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)patch.reparto=m.reparto||'';var r=await sb.from('movimientos').update(patch).eq('sig',sigOf(m)); setSync(r.error?('error: '+r.error.message):'guardado ✓'); if(r.error)alert('No se guardó el cambio: '+r.error.message+'\nRecarga la página para ver el dato real.'); }
+async function updateMov(m){ setSync('guardando…'); var patch={area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)patch.reparto=m.reparto||'';if(HAS_CAMBIO){patch.cambio_area=m.cambioArea||null;patch.cambio_grupo=m.cambioGrupo||null;}var r=await sb.from('movimientos').update(patch).eq('sig',sigOf(m)); setSync(r.error?('error: '+r.error.message):'guardado ✓'); if(r.error)alert('No se guardó el cambio: '+r.error.message+'\nRecarga la página para ver el dato real.'); }
 function updateObsDebounced(sig){ clearTimeout(obsTimers[sig]); obsTimers[sig]=setTimeout(function(){ if(DB.movs[sig])updateMov(DB.movs[sig]); },700); }
 async function guardarTC(ymStr,v){
   if(!HAS_TC){alert('Falta agregar la columna tc en la tabla saldos (ver SQL de reparto y TC).');return;}
@@ -1124,7 +1136,7 @@ function procesar(){
   hideErr();$('okmsg').style.display='none';var all=[];if(PEND.S)all=all.concat(PEND.S.movs);if(PEND.D)all=all.concat(PEND.D.movs);
   if(!all.length){showErr('No encontré movimientos en el archivo.');return;}
   var built=all.map(function(m){var tc=getTC(ym(m.fecha));
-    return {fecha:m.fecha,mov:m.mov,desc:m.desc,numOp:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldoCont:m.saldoCont,tc:tc,area:clasificar(m.mov,m.desc,m.abono),obs:'',asesor:'',clas:'',cliente:'',lote:'',m2:'',concepto:'',cuota:'',metodoPago:'',personal:'',esFijo:false,proyecto:''};});
+    return {fecha:m.fecha,mov:m.mov,desc:m.desc,numOp:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldoCont:m.saldoCont,tc:tc,area:(function(a){return a==='CAMBIO'&&m.abono>0?'INGRESO':a;})(clasificar(m.mov,m.desc,m.abono)),obs:'',asesor:'',clas:clasificar(m.mov,m.desc,m.abono)==='CAMBIO'&&m.abono>0?'CAMBIO':'',cliente:'',lote:'',m2:'',concepto:'',cuota:'',metodoPago:'',personal:'',esFijo:false,proyecto:''};});
   // Un movimiento es NUEVO solo si su firma estable aparece mas veces en el archivo que las ya guardadas
   var have={};allMovs().forEach(function(m){var k=baseKey(m);have[k]=(have[k]||0)+1;});
   var used={};
@@ -1241,10 +1253,12 @@ function renderMes(){
   renderDetalle();
 }
 function movTexto(m){return [dmy(m.fecha),m.mov,m.desc,m.moneda,String(monto(m)),fmtMon(m),esIngreso(m)?'ingreso':'egreso',areaLabel(m.area),esIngreso(m)?clasLabel(m.clas):'',m.asesor,m.personal,m.obs||'',m.esFijo?'fijo':''].join(' ').toLowerCase();}
+function cambioTag(m){if(!m.cambioGrupo)return '<span class="pill ex" title="Falta enlazar la salida, la entrada y los pagos">sin enlazar</span>';var r=resumenCambio(movsGrupo(m.cambioGrupo)),e=CAMBIO_ESTADO[r.estado];return (m.cambioArea?'<span class="s">'+esc(areaLabel(m.cambioArea))+'</span>':'')+'<span class="pill '+e[0]+'">'+e[1]+(r.tc?' · TC '+r.tc.toFixed(3):'')+'</span>';}
 function clsHtml(m){
-  if(esIngreso(m)){var c=m.clas;var col=c==='VENTAS'?'#16a34a':c==='COBRANZA'?'#0ea5e9':c==='FINANCIAMIENTO'?'#a78bfa':'#94a3b8';
-    return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+col+'"></span>'+esc(c?clasLabel(c):'Sin clasificar')+'</span>'+(m.asesor?'<span class="s">'+esc(m.asesor)+'</span>':'')+'</div>';}
+  if(esIngreso(m)){var c=m.clas;var col=c==='VENTAS'?'#16a34a':c==='COBRANZA'?'#0ea5e9':c==='FINANCIAMIENTO'?'#a78bfa':c==='CAMBIO'?'#14b8a6':'#94a3b8';
+    return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+col+'"></span>'+esc(c==='CAMBIO'?'Cambio de moneda':c?clasLabel(c):'Sin clasificar')+'</span>'+(c==='CAMBIO'?cambioTag(m):'')+(m.asesor?'<span class="s">'+esc(m.asesor)+'</span>':'')+'</div>';}
   if(m.esFijo)return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:var(--gr-brand)"></span>Costo fijo</span><span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>'+esc(repartoTxt(m))+'</span></span>'+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+'</div>';
+  if(m.area==='CAMBIO')return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:#14b8a6"></span>Cambio de moneda</span>'+cambioTag(m)+'</div>';
   if(m.area==='REVISAR')return '<span class="clspill rev"><span class="dot round" style="background:var(--gr-neg)"></span>REVISAR</span>';
   return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+(AREA_COLOR[m.area]||'#64748b')+'"></span>'+esc(areaLabel(m.area))+'</span>'+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+(m.esFijo?'<span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>Fijo · '+esc(repartoTxt(m))+'</span></span>':'')+'</div>';
 }
@@ -1289,6 +1303,12 @@ var PANEL_MOVIL=false;
 function abrirPanelMovil(){PANEL_MOVIL=true;var p=$('detPanel');if(p)p.classList.add('open');$('panelBg').classList.add('open');}
 function cerrarPanelMovil(){PANEL_MOVIL=false;var p=$('detPanel');if(p)p.classList.remove('open');$('panelBg').classList.remove('open');}
 function siguienteRev(desde){var l=detFiltrados(detBase()).filter(function(m){return m.area==='REVISAR'&&sigOf(m)!==desde;});return l.length?sigOf(l[0]):null;}
+function panelCambioHtml(m){
+  if(m.cambioGrupo)return historialCambioHtml(m.cambioGrupo,sigOf(m))+'<button class="btn btn-secondary" id="pCam" style="align-self:flex-start">'+ico('arrows-left-right')+'Editar el cambio</button>';
+  if(esMovCambio(m)||/MUVEX|CASA DE CAMBIO|D[OÓ]LAR/i.test((m.desc||'')+' '+(m.obs||'')))return '<div class="alert warn">'+ico('arrows-left-right')+'<span>'+(esMovCambio(m)?'Es un cambio de moneda pero aún no está enlazado':'Parece una compra o venta de dólares. Si lo es, ármalo como cambio de moneda: no es gasto ni ingreso, y queda enlazado')+(esMovCambio(m)?' ':'')+' con su '+(m.cargo>0?'entrada':'salida')+' en la otra cuenta y los pagos que se hicieron.</span></div><button class="btn btn-primary" id="pCam" style="align-self:flex-start">'+ico('arrows-left-right')+'Armar el cambio</button>';
+  if(m.cargo>0&&m.moneda==='USD'&&m.area!=='BANCO')return '<button class="btn btn-ghost" id="pCam" style="align-self:flex-start;font-size:12.5px">'+ico('arrows-left-right')+'¿Se pagó con dólares comprados? Enlazar a un cambio</button>';
+  return '';
+}
 function panelHtml(){
   var m=DB.movs[SEL];if(!m)return '';var ing=esIngreso(m),u=m.moneda==='USD';
   var h='<div class="ph-head"><span class="pill '+(ing?'ok':'ex')+'">'+(ing?'Ingreso':'Egreso')+'</span><span class="muted" style="font-size:12.5px">'+dmy(m.fecha)+' · '+esc(m.mov)+'</span><button class="x" id="pClose" aria-label="Cerrar">'+ico('x')+'</button></div><div class="ph-body">'
@@ -1305,10 +1325,11 @@ function panelHtml(){
           +(m.esFijo?'<button class="repbtn" id="pRep" title="Elegir entre qué áreas se reparte">÷ '+esc(repartoTxt(m))+'</button>':'<span class="muted3" style="font-size:11.5px" id="pRepHint"></span>')+'</div>';
     }
     h+='<label class="pfield">Observación<textarea id="pObs" placeholder="—">'+esc(m.obs||'')+'</textarea></label>';
+    h+=panelCambioHtml(m);
   }else{
     h+='<div class="ro-grid">'+(ing?'<span>Clasificación</span><span>'+esc(m.clas?clasLabel(m.clas):'—')+'</span><span>Asesor</span><span>'+esc(m.asesor||'—')+'</span>'
       :'<span>Área</span><span>'+esc(areaLabel(m.area))+'</span><span>Personal</span><span>'+esc(m.personal||'—')+'</span><span>Costo fijo</span><span>'+(m.esFijo?'Sí · según el cuadro: '+esc(repartoTxt(m)):'No')+'</span>')
-      +'<span>Observación</span><span>'+esc(m.obs||'—')+'</span></div><div class="muted3" style="font-size:12px;display:flex;align-items:center;gap:6px">'+ico('eye')+'Modo solo lectura</div>';
+      +'<span>Observación</span><span>'+esc(m.obs||'—')+'</span></div>'+(m.cambioGrupo?historialCambioHtml(m.cambioGrupo,SEL):'')+'<div class="muted3" style="font-size:12px;display:flex;align-items:center;gap:6px">'+ico('eye')+'Modo solo lectura</div>';
   }
   h+='</div>';
   if(!READONLY){var sig2=siguienteRev(SEL);
@@ -1331,6 +1352,7 @@ function wireDet(lista){
   var ps=$('pSave');if(ps)ps.onclick=function(){guardarPanel(false);};
   var pn=$('pNext');if(pn)pn.onclick=function(){guardarPanel(true);};
   var pr=$('pRep');if(pr)pr.onclick=function(){abrirReparto(SEL);};
+  var pcm=$('pCam');if(pcm)pcm.onclick=async function(){var m=DB.movs[SEL];if(!m)return;var dirty=false;if(!READONLY){var a0=m.area,c0=m.clas;leerPanel(m);dirty=a0!==m.area||c0!==m.clas;if(dirty)await updateMov(m);}abrirEnlaceCambio(SEL);};
   var pf=$('pFijo'),ph=$('pRepHint');if(pf&&ph)pf.onchange=function(){ph.textContent=pf.checked?'Guarda para elegir el reparto':'';};
 }
 function leerPanel(m){
@@ -1810,6 +1832,94 @@ function renderConsolCAC(){
   box.innerHTML=kp+ch+rk+tabla;
 }
 
+// ============ Cambio de moneda (compra/venta de dólares) ============
+// Una compra de dólares: salen soles a la casa de cambio → entran dólares → se pagan gastos con esos dólares.
+// Los movimientos se unen con un mismo "grupo"; la salida y la entrada se clasifican como Cambio de moneda
+// (no son gasto ni ingreso) y los pagos quedan en el área que realmente gastó.
+var CAMBIO_AREAS=['MKT','VENTAS','ADM','OPE Planta','OPE Infra','OPE Comex','DEUDA GG','EVOLUTION','OTROS'];
+function esMovCambio(m){return (m.cargo>0&&m.area==='CAMBIO')||(m.abono>0&&m.clas==='CAMBIO');}
+// tramo del cambio (salida o entrada): ya clasificado, o con la casa de cambio en la descripción
+function tramoCambio(m){return esMovCambio(m)||/MUVEX|CASA DE CAMBIO/i.test(m.desc||'');}
+function pareceCambio(m){return esMovCambio(m)||/MUVEX|CASA DE CAMBIO|D[OÓ]LAR/i.test((m.desc||'')+' '+(m.obs||''));}
+function movsGrupo(g){if(!g)return [];return allMovs().filter(function(m){return m.cambioGrupo===g;}).sort(function(a,b){return a.fecha<b.fecha?-1:a.fecha>b.fecha?1:(b.cargo>0&&b.moneda==='PEN'?1:0)-(a.cargo>0&&a.moneda==='PEN'?1:0);});}
+// Resumen de un grupo: cuánto salió, cuánto entró, cuánto se pagó con esa moneda y en qué estado está
+function resumenCambio(ms){
+  var r={salePEN:0,entraUSD:0,saleUSD:0,entraPEN:0,pagado:0,pagos:[],area:'',fecha:''};
+  ms.forEach(function(m){if(!r.fecha||m.fecha<r.fecha)r.fecha=m.fecha;if(m.cambioArea&&!r.area)r.area=m.cambioArea;
+    if(tramoCambio(m)){if(m.cargo>0){if(m.moneda==='PEN')r.salePEN+=m.cargo;else r.saleUSD+=m.cargo;}else{if(m.moneda==='USD')r.entraUSD+=m.abono;else r.entraPEN+=m.abono;}}
+    else if(m.cargo>0){r.pagado+=m.cargo;r.pagos.push(m);}});
+  r.compra=r.salePEN>0||r.entraUSD>0;
+  if(r.compra){r.tc=r.salePEN&&r.entraUSD?r.salePEN/r.entraUSD:null;r.estado=!r.salePEN?'sin_salida':!r.entraUSD?'sin_entrada':r.entraUSD-r.pagado>1?'por_usar':'completo';r.libre=r.entraUSD-r.pagado;}
+  else{r.tc=r.saleUSD&&r.entraPEN?r.entraPEN/r.saleUSD:null;r.estado=!r.saleUSD?'sin_salida':!r.entraPEN?'sin_entrada':'completo';r.libre=0;}
+  return r;
+}
+var CAMBIO_ESTADO={completo:['ok','Completo'],por_usar:['warn','Dólares por usar'],sin_entrada:['ex','Falta la entrada'],sin_salida:['ex','Falta la salida']};
+function historialCambioHtml(g,actual){
+  var ms=movsGrupo(g);if(!ms.length)return '';var r=resumenCambio(ms),e=CAMBIO_ESTADO[r.estado];
+  var paso=function(m){var u=m.moneda==='USD',amt=u?U(m.cargo||m.abono):S(m.cargo||m.abono),txt;
+    if(tramoCambio(m))txt=m.cargo>0?(u?'Se vendieron dólares':'Salieron soles a la casa de cambio'):(u?'Entraron los dólares':'Entraron los soles');
+    else txt='Se pagó · '+esc(areaLabel(m.area));
+    return '<li class="'+(sigOf(m)===actual?'on':'')+'"><span class="d">'+dmy(m.fecha)+'</span><span class="t">'+txt+'<em>'+esc(m.desc||m.mov)+(m.obs?' · '+esc(m.obs):'')+'</em></span><b class="'+(m.cargo>0?'neg':'pos')+'">'+(m.cargo>0?'−':'+')+amt+'</b></li>';};
+  return '<div class="cmhist"><div class="cmhist-h"><b>Historial del cambio</b><span class="pill '+e[0]+'">'+e[1]+'</span></div><ol>'+ms.map(paso).join('')+'</ol>'
+    +'<div class="cmhist-f">'+(r.tc?'TC pagado <b>'+r.tc.toFixed(3)+'</b>':'TC: falta un lado del cambio')+(r.compra&&r.entraUSD?' · usado '+U(r.pagado)+' de '+U(r.entraUSD)+(r.libre>1?' · <b class="neg">quedan '+U(r.libre)+'</b>':''):'')+(r.area?' · pedido por <b>'+esc(areaLabel(r.area))+'</b>':'')+'</div></div>';
+}
+// Sugerencia de pareja: el movimiento de casa de cambio en la otra moneda más cercano en fecha y con TC razonable
+function parejaSugerida(m){
+  var otra=m.moneda==='USD'?'PEN':'USD',best=null,bs=1e9,quiere=m.cargo>0?'abono':'cargo';
+  allMovs().forEach(function(x){if(x.moneda!==otra||!(x[quiere]>0)||x.cambioGrupo||!pareceCambio(x))return;
+    var d=(new Date(x.fecha)-new Date(m.fecha))/864e5;if(m.cargo>0?(d<-1||d>4):(d<-4||d>1))return;
+    var pen=m.moneda==='PEN'?(m.cargo||m.abono):(x.cargo||x.abono),usd=m.moneda==='USD'?(m.cargo||m.abono):(x.cargo||x.abono),tc=pen/usd;if(tc<3||tc>4.2)return;
+    var sc=Math.abs(d)*10+Math.abs(tc-3.4);if(sc<bs){bs=sc;best=x;}});
+  return best;
+}
+// Pagos sugeridos: egresos en dólares desde la entrada hasta cubrir lo comprado
+function pagosSugeridos(entra,yaUsado){
+  var falta=entra.abono-(yaUsado||0),out=[];if(falta<=1)return out;
+  allMovs().filter(function(x){return x.moneda===entra.moneda&&x.cargo>0&&!x.cambioGrupo&&!pareceCambio(x)&&x.area!=='BANCO'&&x.fecha>=entra.fecha&&cDias(x.fecha,entra.fecha)<=7;})
+    .sort(function(a,b){return a.fecha<b.fecha?-1:1;}).forEach(function(x){if(falta>1&&x.cargo<=falta+2){out.push(x);falta-=x.cargo;}});
+  return out;
+}
+function nuevoGrupoCambio(m){return 'CM-'+m.fecha+'-'+Math.random().toString(36).slice(2,7);}
+// Ventana para armar o corregir el grupo de un cambio de moneda
+function abrirEnlaceCambio(sig){
+  var m=DB.movs[sig];if(!m||READONLY)return;
+  var g=m.cambioGrupo||nuevoGrupoCambio(m),sel={};movsGrupo(m.cambioGrupo).forEach(function(x){sel[sigOf(x)]=1;});sel[sig]=1;
+  if(!m.cambioGrupo){var p=pareceCambio(m)?parejaSugerida(m):null;if(p){sel[sigOf(p)]=1;var en=m.abono>0?m:p.abono>0?p:null;if(en&&en.moneda==='USD')pagosSugeridos(en).forEach(function(x){sel[sigOf(x)]=1;});}}
+  var area=m.cambioArea||(/\bMKT\b|MARKETING/i.test(m.obs||'')?'MKT':'');
+  var cands=allMovs().filter(function(x){return sigOf(x)!==sig&&cDias(x.fecha,m.fecha)<=10&&(!x.cambioGrupo||x.cambioGrupo===m.cambioGrupo)&&(pareceCambio(x)||(x.cargo>0&&x.moneda==='USD'&&x.area!=='BANCO')||sel[sigOf(x)]);})
+    .sort(function(a,b){return (sel[sigOf(b)]?1:0)-(sel[sigOf(a)]?1:0)||(a.fecha<b.fecha?-1:1);});
+  var old=$('concModal');if(old)old.remove();
+  var w=document.createElement('div');w.id='concModal';w.className='modal-bg';
+  w.innerHTML='<div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="cxT"><div class="cm-head"><div><h3 id="cxT">Cambio de moneda</h3><div class="muted" style="font-size:13px;margin-top:4px">Une la salida, la entrada y los pagos hechos con esa moneda</div></div><button class="x" id="cmX" aria-label="Cerrar">'+ico('x')+'</button></div>'
+    +'<label class="pfield">Área que pidió el cambio<select id="cxArea"><option value="">—</option>'+CAMBIO_AREAS.map(function(a){return '<option value="'+a+'"'+(area===a?' selected':'')+'>'+esc(areaLabel(a))+'</option>';}).join('')+'</select></label>'
+    +'<div class="cm-sec"><b>Movimientos del cambio</b><span class="muted" style="font-size:12.5px">Marca la salida, la entrada en la otra moneda y los pagos que se hicieron con ella. Los marcados ya vienen sugeridos.</span><div class="candlist" id="cxList"></div><div class="cm-sum" id="cxSum"></div></div>'
+    +'<div class="cm-foot">'+(m.cambioGrupo?'<button class="btn btn-ghost" id="cxDel">'+ico('link-break')+'Deshacer grupo</button>':'')+'<span class="sp"></span><button class="btn btn-secondary" id="cxCan">Cancelar</button><button class="btn btn-primary" id="cxOk">Guardar</button></div></div>';
+  document.body.appendChild(w);
+  function lista(){
+    $('cxList').innerHTML=[m].concat(cands).map(function(x){var k=sigOf(x),u=x.moneda==='USD';
+      return '<label class="cand'+(sel[k]?' on':'')+'"><input type="checkbox" class="chk" data-k="'+encodeURIComponent(k)+'"'+(sel[k]?' checked':'')+(k===sig?' disabled':'')+'><span class="cd"><b>'+esc(x.desc||x.mov)+'</b><span>'+dmy(x.fecha)+' · '+(u?'Dólares':'Soles')+' · '+(esMovCambio(x)?'Cambio de moneda':esc(areaLabel(x.area)))+(x.obs?' · '+esc(x.obs):'')+'</span></span><b class="cm-m '+(x.cargo>0?'neg':'pos')+'">'+(x.cargo>0?'−':'+')+(u?U(x.cargo||x.abono):S(x.cargo||x.abono))+'</b></label>';}).join('');
+    Array.prototype.forEach.call($('cxList').querySelectorAll('input[data-k]'),function(c){c.onchange=function(){var k=decodeURIComponent(c.dataset.k);if(c.checked)sel[k]=1;else delete sel[k];lista();};});
+    var r=resumenCambio(Object.keys(sel).map(function(k){return DB.movs[k];}).filter(Boolean)),e=CAMBIO_ESTADO[r.estado];
+    $('cxSum').innerHTML='<span class="pill '+e[0]+'">'+e[1]+'</span> '+(r.tc?'TC pagado <b>'+r.tc.toFixed(3)+'</b>':'')+(r.compra&&r.entraUSD?' · pagos '+U(r.pagado)+' de '+U(r.entraUSD):'');
+  }
+  lista();
+  function cerrar(){w.remove();}
+  $('cmX').onclick=cerrar;$('cxCan').onclick=cerrar;w.onclick=function(e){if(e.target===w)cerrar();};
+  async function guardar(nuevo,areaSel){
+    var antes=movsGrupo(m.cambioGrupo),cambios=[];SILENT=true;
+    antes.forEach(function(x){if(!nuevo[sigOf(x)]){x.cambioGrupo='';x.cambioArea='';cambios.push(x);}});
+    Object.keys(nuevo).forEach(function(k){var x=DB.movs[k];if(!x)return;x.cambioGrupo=g;x.cambioArea=areaSel;
+      // la salida y la entrada del cambio quedan como Cambio de moneda
+      if(x.cargo>0&&(x.area==='DVO'||(x.area==='OTROS'&&/MUVEX|DOLAR/i.test((x.desc||'')+' '+(x.obs||'')))||x.area==='REVISAR'))x.area='CAMBIO';
+      if(x.abono>0&&(x.clas==='FINANCIAMIENTO'||!x.clas)&&/MUVEX|DOLAR/i.test((x.desc||'')+' '+(x.obs||'')))x.clas='CAMBIO';
+      cambios.push(x);});
+    for(var i=0;i<cambios.length;i++)await updateMov(cambios[i]);
+    SILENT=false;setSync('guardado ✓');cerrar();renderActual();
+  }
+  var dl=$('cxDel');if(dl)dl.onclick=async function(){if(!confirm('¿Deshacer el grupo? Los movimientos quedan sueltos (no se borran).'))return;await guardar({},'');};
+  $('cxOk').onclick=async function(){if(Object.keys(sel).length<2){alert('Marca al menos la salida y la entrada del cambio.');return;}this.disabled=true;await guardar(sel,$('cxArea').value);};
+}
+
 // ============ Conciliación: lectura de Evolta y cruce automático ============
 // El banco manda en el dinero; Evolta dice de qué cliente, lote y cuota es cada pago.
 function cNorm(s){return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();}
@@ -2017,20 +2127,38 @@ function lotesVentas(partes){
   var T={mes:0,m2:0,m2con:0};ls.forEach(function(g){T.mes+=g.mes;if(g.m2){T.m2+=g.m2;T.m2con+=g.mes;}});
   return {ls:ls,sinLote:sinLote,T:T};
 }
+// ============ Cambio de moneda en el estado de resultados ============
+// Lee la clasificación de Movimientos: lo marcado como Cambio de moneda no es gasto ni ingreso.
+// El TC del periodo es el realmente pagado en las compras de dólares completas (soles que salieron / dólares que entraron).
+function cambiosMoneda(enP){
+  var ms=allMovs().filter(function(m){return enP(m.fecha)&&esMovCambio(m);}),set={},grupos={},sinPar=[];
+  ms.forEach(function(m){set[m.sig]=1;if(m.cambioGrupo)grupos[m.cambioGrupo]=1;else sinPar.push(m);});
+  var S_=0,U_=0,n=0,pagos={};
+  Object.keys(grupos).forEach(function(g){var gm=movsGrupo(g),r=resumenCambio(gm);n++;
+    if(r.estado==='sin_entrada'||r.estado==='sin_salida')gm.filter(function(m){return esMovCambio(m)&&enP(m.fecha);}).forEach(function(m){sinPar.push(m);});
+    else if(r.compra&&r.tc){S_+=r.salePEN;U_+=r.entraUSD;}});
+  return {n:n,sinPar:sinPar,set:set,soles:S_,usd:U_,tc:U_?S_/U_:null,pares:Object.keys(grupos)};
+}
+// Egresos por área con los dólares al TC realmente pagado en las compras de dólares del periodo
+function areasConTC(movs,cm){
+  var A=sumarAreas(movs.filter(function(m){return !cm.set[m.sig];}),NUCLEO.concat(SEG)).by;
+  if(cm.tc)Object.keys(A).forEach(function(k){var r=A[k];r.eq=r.s+r.u*cm.tc;});
+  return A;
+}
 // Estado de resultados del periodo (base caja): ventas y cobranza según la clasificación del banco, S/ con dólares al TC del mes
 function estadoResultadosHtml(movs,partes){
-  var t={ventas:0,cob:0,otros:0,fin:0,interno:0};
-  movs.forEach(function(m){if(!(m.abono>0))return;var s=solesDe(m),r=CONC.rows[m.sig];
+  var t={ventas:0,cob:0,otros:0,fin:0,interno:0},cm=cambiosMoneda(periodoConc());
+  movs.forEach(function(m){if(!(m.abono>0)||cm.set[m.sig])return;var s=solesDe(m),r=CONC.rows[m.sig];
     if(m.clas==='FINANCIAMIENTO'){t.fin+=s;return;}
     if(r&&r.tipo==='interno'){t.interno+=s;return;}
     if(m.clas==='VENTAS')t.ventas+=s;else if(m.clas==='COBRANZA')t.cob+=s;else t.otros+=s;});
   var LV=lotesVentas(partes),nl=LV.ls.length;
-  var A=sumarAreas(movs,NUCLEO.concat(SEG)).by,ope=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],otros=['BANCO','DVO','OTROS'];
+  var A=areasConTC(movs,cm),ope=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],otros=['BANCO','DVO','OTROS'];
   var cap=A['DEUDA GG'].eq,evo=A['EVOLUTION'].eq,ingCli=t.ventas+t.cob+t.otros;
   var ing=t.ventas+t.otros,egO=ope.reduce(function(a,k){return a+A[k].eq;},0),egX=otros.reduce(function(a,k){return a+A[k].eq;},0);
   var rev=movs.filter(function(m){return m.cargo>0&&m.area==='REVISAR';}).reduce(function(a,m){return a+montoPEN(m,true);},0);
   function L(tx,v,cls,sub){return '<tr class="'+(cls||'')+'"><td>'+tx+(sub?'<div class="sub">'+sub+'</div>':'')+'</td><td class="num">'+(v<0?'('+S(-v)+')':S(v))+'</td><td class="num muted3">'+(ing?(v/ing*100).toFixed(1)+'%':'')+'</td></tr>';}
-  return '<div class="card"><div class="card-head"><div><h2 class="card-title">Estado de resultados</h2><div class="card-sub">Base caja · lo que entró y salió del banco, según su clasificación · dólares al TC del mes</div></div></div><div class="tablewrap"><table class="table er"><tbody>'
+  return '<div class="card"><div class="card-head"><div><h2 class="card-title">Estado de resultados</h2><div class="card-sub">Base caja · lo que entró y salió del banco, según su clasificación · '+(cm.tc?'dólares al TC pagado ('+cm.tc.toFixed(3)+')':'dólares al TC del mes')+'</div></div></div>'+(cm.sinPar.length?'<div class="alert warn" style="margin-bottom:10px">'+ico('warning')+'<span>'+cm.sinPar.map(function(m){return 'Cambio de moneda del '+dmy(m.fecha)+' por '+(m.moneda==='USD'?U(m.cargo||m.abono):S(m.cargo||m.abono));}).join(', ')+': '+(cm.sinPar.length>1?'no tienen':'no tiene')+' su pareja en la otra cuenta. Enlázalo en Movimientos (Armar el cambio) o revisa que el estado de cuenta en '+(cm.sinPar[0].moneda==='PEN'?'dólares':'soles')+' esté cargado completo.</span></div>':'')+'<div class="tablewrap"><table class="table er"><tbody>'
     +L('Ventas',t.ventas,'',nl+' lote'+(nl!==1?'s':'')+(LV.T.m2?' · '+nf(LV.T.m2).replace(/\.00$/,'')+' m² · '+S(LV.T.m2con/LV.T.m2)+' por m²':'')+(LV.sinLote>1?' · '+S(LV.sinLote)+' sin lote asignado':''))
     +(t.otros?L('Ingresos sin clasificar',t.otros,'','Clasifícalos en Movimientos (ventas o cobranza)'):'')
     +L('Ingresos del periodo',ing,'sum','La cobranza va abajo como referencia')
@@ -2045,15 +2173,16 @@ function estadoResultadosHtml(movs,partes){
     +'<div class="cobref"><div class="cobref-h"><b>Aparte</b><span>No suma al resultado de la empresa</span></div>'
     +'<div class="cobref-r"><span>Capitalización Dirección<em>'+(ingCli?(cap/ingCli*100).toFixed(1):'0')+'% de lo que entró de clientes · meta '+RECOM['DEUDA GG']+'%</em></span><b>'+S(cap)+'</b></div>'
     +(evo?'<div class="cobref-r"><span>Evolution<em>entidad aparte · su parte de los costos fijos</em></span><b>'+S(evo)+'</b></div>':'')
-    +'<div class="cobref-r"><span>Financiamiento recibido<em>préstamos y compra de dólares</em></span><b>'+S(t.fin)+'</b></div>'
+    +'<div class="cobref-r"><span>Financiamiento recibido<em>préstamos</em></span><b>'+S(t.fin)+'</b></div>'
+    +((cm.n||cm.sinPar.length)?'<div class="cobref-r"><span>Cambio de moneda<em>'+(cm.usd?'compra de '+U(cm.usd)+' a TC '+cm.tc.toFixed(3)+' · ':'')+cm.n+' cambio'+(cm.n!==1?'s':'')+(cm.sinPar.length?' · '+cm.sinPar.length+' sin pareja':'')+' · no es gasto</em></span><b>'+S(cm.soles+cm.sinPar.reduce(function(a,m){return a+(m.moneda==='PEN'&&m.cargo>0?m.cargo:0);},0))+'</b></div>':'')
     +(t.interno?'<div class="cobref-r"><span>Transferencias internas</span><b>'+S(t.interno)+'</b></div>':'')
     +'</div>'
     +'<p class="nota">Ventas y cobranza salen de cómo está clasificado cada ingreso en el banco. El precio por m² es lo que entró en el periodo entre los m² del lote. Capitalización Dirección y Evolution van aparte. Los costos fijos ya van repartidos por área.</p></div>';
 }
 // Distribución de lo que entró de clientes: 50% capitalización y 50% áreas, con el % recomendado de cada área
 function distribucionHtml(movs){
-  var ingCli=0;movs.forEach(function(m){if(m.abono>0&&m.clas!=='FINANCIAMIENTO'&&!(CONC.rows[m.sig]&&CONC.rows[m.sig].tipo==='interno'))ingCli+=solesDe(m);});
-  var A=sumarAreas(movs,NUCLEO.concat(SEG)).by,ot=A['BANCO'].eq+A['DVO'].eq+A['OTROS'].eq,usado=0;
+  var cm=cambiosMoneda(periodoConc()),ingCli=0;movs.forEach(function(m){if(m.abono>0&&!cm.set[m.sig]&&m.clas!=='FINANCIAMIENTO'&&!(CONC.rows[m.sig]&&CONC.rows[m.sig].tipo==='interno'))ingCli+=solesDe(m);});
+  var A=areasConTC(movs,cm),ot=A['BANCO'].eq+A['DVO'].eq+A['OTROS'].eq,usado=0;
   function fila(nom,v,rec,cls){var pct=ingCli?v/ingCli*100:0;usado+=v;var st=rec==null?'':pct>rec+0.05?'<span class="pill ex">+'+(pct-rec).toFixed(1)+' pts</span>':'<span class="pill ok">'+ico('check')+'</span>';
     return '<tr class="'+(cls||'')+'"><td>'+nom+'</td><td class="num">'+S(v)+'</td><td class="num"><b>'+pct.toFixed(1)+'%</b></td><td class="num muted">'+(rec==null?'—':rec+'%')+'</td><td class="num">'+st+'</td></tr>';}
   var areas=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],recA=areas.reduce(function(a,k){return a+RECOM[k];},0),gA=areas.reduce(function(a,k){return a+A[k].eq;},0);
@@ -2114,7 +2243,7 @@ function desistidosPeriodo(enP){
 // Indicadores de ventas del periodo, guiados por el dinero del banco
 function erVentasHtml(movs,partes){
   var enP=periodoConc(),LV=lotesVentas(partes),des=desistidosPeriodo(enP),fin={};
-  var A=sumarAreas(movs,NUCLEO).by,gV=A['VENTAS'].eq,gM=A['MKT'].eq,n=LV.ls.length,T=LV.T,nc=contratosPeriodo(enP).length;
+  var A=areasConTC(movs,cambiosMoneda(enP)),gV=A['VENTAS'].eq,gM=A['MKT'].eq,n=LV.ls.length,T=LV.T,nc=contratosPeriodo(enP).length;
   LV.ls.forEach(function(g){var c=g.c;var t=!c?'Sin contrato':/HIPOTEC/i.test(c.tipo_fin)?'Hipotecario':/DIRECTO/i.test(c.tipo_fin)?'Directo':(c.tipo_fin||'Otro');fin[t]=(fin[t]||0)+1;});
   var pagoDes={};partes.forEach(function(x){if(x.c)String(x.c.lotes).split(' + ').forEach(function(l){var k=cLoteKey(x.c.etapa,l);pagoDes[k]=(pagoDes[k]||0)+x.s;});});
   var top=LV.ls.slice().filter(function(g){return g.pm2!=null;}).sort(function(a,b){return b.pm2-a.pm2;});
