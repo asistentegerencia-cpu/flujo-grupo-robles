@@ -67,3 +67,28 @@ create policy "conciliacion_log select" on public.conciliacion_log for select to
 create policy "conciliacion_log editor all" on public.conciliacion_log for all to authenticated
   using (exists (select 1 from public.perfiles where perfiles.id = auth.uid() and perfiles.rol = 'editor'))
   with check (exists (select 1 from public.perfiles where perfiles.id = auth.uid() and perfiles.rol = 'editor'));
+
+-- Contratos (Reporte de Flujo de Caja de Evolta): precio, inicial, saldo a financiar, separaciones sin venta
+create table if not exists public.evolta_contratos(
+  id text primary key,                -- ETAPA|LOTE1|DOC
+  etapa text, lotes text, titular text, doc text,
+  fecha_sep date, fecha_venta date, precio numeric, ci_total numeric, ci_cobrada numeric,
+  sf_total numeric, sf_cobrada numeric, pagado numeric, saldo numeric,
+  tipo_fin text, vendedor text, moneda text, updated_at timestamptz not null default now()
+);
+-- Stock de lotes (Reporte de Stock de Inmuebles): m², precio y estado de cada lote
+create table if not exists public.evolta_stock(
+  id text primary key,                -- ETAPA|LOTE
+  etapa text, lote text, estado text, m2 numeric, precio numeric, lista numeric, moneda text,
+  updated_at timestamptz not null default now()
+);
+alter table public.evolta_contratos enable row level security;
+alter table public.evolta_stock enable row level security;
+create policy "evolta_contratos select" on public.evolta_contratos for select to authenticated using (true);
+create policy "evolta_contratos editor all" on public.evolta_contratos for all to authenticated
+  using (exists (select 1 from public.perfiles where perfiles.id = auth.uid() and perfiles.rol = 'editor'))
+  with check (exists (select 1 from public.perfiles where perfiles.id = auth.uid() and perfiles.rol = 'editor'));
+create policy "evolta_stock select" on public.evolta_stock for select to authenticated using (true);
+create policy "evolta_stock editor all" on public.evolta_stock for all to authenticated
+  using (exists (select 1 from public.perfiles where perfiles.id = auth.uid() and perfiles.rol = 'editor'))
+  with check (exists (select 1 from public.perfiles where perfiles.id = auth.uid() and perfiles.rol = 'editor'));
