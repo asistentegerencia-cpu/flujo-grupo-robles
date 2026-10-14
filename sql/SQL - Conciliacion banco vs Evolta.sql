@@ -92,3 +92,6 @@ create policy "evolta_stock select" on public.evolta_stock for select to authent
 create policy "evolta_stock editor all" on public.evolta_stock for all to authenticated
   using (exists (select 1 from public.perfiles where perfiles.id = auth.uid() and perfiles.rol = 'editor'))
   with check (exists (select 1 from public.perfiles where perfiles.id = auth.uid() and perfiles.rol = 'editor'));
+
+-- Inicial pactada (separación + cuota inicial) y monto a financiar de cada OC, del Reporte de Ventas
+alter table public.evolta_ventas add column if not exists inicial numeric, add column if not exists financiar numeric;
