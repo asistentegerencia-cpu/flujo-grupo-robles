@@ -2107,6 +2107,22 @@ function repartoIngresos(){
 }
 // Fecha en que empezó cada lote: la separación de Evolta o, si no está en Evolta, el primer dinero que entró al banco
 function inicioGrupos(partes){var o={};partes.forEach(function(x){if(!x.g)return;var f=x.c?inicioContrato(x.c):x.m.fecha;if(!o[x.g]||f<o[x.g])o[x.g]=f;});return o;}
+// Primer dinero que entró al banco para cada lote (manda el banco, no la fecha de Evolta)
+function primerPagoBanco(partes){var o={};partes.forEach(function(x){if(!x.g)return;if(!o[x.g]||x.m.fecha<o[x.g])o[x.g]=x.m.fecha;});return o;}
+function diasEntre(a,b){return Math.round((new Date(b)-new Date(a))/864e5);}
+// Venta o cobranza sugerida para cada ingreso: las cuotas de financiamiento o saldo son cobranza;
+// lo demás es venta si entra dentro de los 60 días del primer pago del lote en el banco (y el contrato no es antiguo)
+function clasSugeridas(partes){
+  var pp=primerPagoBanco(partes),por={};
+  partes.forEach(function(x){if(!x.g)return;var t=cNorm(x.tipos||''),v;
+    if(x.cat==='cuota'||x.cat==='sf'||/FINANCIAMIENTO|SALDO/.test(t))v=false;
+    else{var ini=x.c?inicioContrato(x.c):'';v=diasEntre(pp[x.g],x.m.fecha)<=60&&(!ini||diasEntre(ini,x.m.fecha)<=90);}
+    var e=por[x.m.sig]=por[x.m.sig]||{V:0,C:0};e[v?'V':'C']+=x.s;});
+  var o={};Object.keys(por).forEach(function(s){o[s]=por[s].V>=por[s].C?'VENTAS':'COBRANZA';});return o;
+}
+// Lotes con OC activa en el Reporte de Ventas
+function ocActivas(){var o={};CONC.ventas.forEach(function(v){if(v.estado_oc!=='Activo')return;[v.lote,v.lote2].forEach(function(l){if(l){o[cLoteKey(v.etapa,l)]=1;o['id|'+cLoteId(l)]=1;}});});return o;}
+function grupoConOC(g,oc){if(g.c)return String(g.c.lotes||'').split(' + ').some(function(l){return oc[cLoteKey(g.c.etapa,l)];});return !!(g.lote&&oc['id|'+cLoteId(g.lote)]);}
 // Pagos de Evolta enlazados a más dinero del que valen (el mismo pago usado en dos depósitos)
 function pagosDobles(){
   var uso={},n={};Object.keys(CONC.rows).forEach(function(sig){var r=CONC.rows[sig],m=DB.movs[sig];if(!m||r.tipo!=='evolta'||!r.pagos)return;
@@ -2208,14 +2224,15 @@ function distribucionHtml(movs){
 }
 // Lotes del mes: los lotes con dinero de VENTAS en el banco; Evolta solo aporta m², precio e inicial pactada
 function lotesMesHtml(partes){
-  var fin=CV.ym.length===4?CV.ym+'-12-31':CV.ym+'-31',LV=lotesVentas(partes),acum={};
+  var fin=CV.ym.length===4?CV.ym+'-12-31':CV.ym+'-31',LV=lotesVentas(partes),acum={},pp=primerPagoBanco(partes),oc=ocActivas();
   partes.forEach(function(x){if(x.g&&x.m.fecha<=fin&&(x.cat==='inicial'||x.cat==='cuota'))acum[x.g]=(acum[x.g]||0)+x.s;});
   var ls=LV.ls.map(function(g){var c=g.c,st=stockGrupo(g);
     g.acum=acum[g.k]||g.mes;g.precio=c?c.precio:null;g.ci=c?c.ci_total:null;g.sft=c?c.sf_total:null;
     g.falta=g.ci!=null?Math.max(0,g.ci-g.acum):null;
     var minuta=st.some(function(x){return /MINUTA/.test(cNorm(x.estado))&&!/SIN MINUTA/.test(cNorm(x.estado));});
-    g.venta=!!(c&&c.fecha_venta)||minuta||g.acum>=10000;g.sinMinuta=g.venta&&!(c&&c.fecha_venta)&&!minuta;
-    g.evolta=c?c.ci_cobrada:null;g.fecha=c?inicioContrato(c):'';return g;});
+    g.oc=grupoConOC(g,oc);
+    g.venta=g.oc||!!(c&&c.fecha_venta)||minuta||g.acum>=10000;g.sinMinuta=g.venta&&!(c&&c.fecha_venta)&&!minuta;
+    g.evolta=c?c.ci_cobrada:null;g.fecha=pp[g.k]||'';return g;});
   var T={ci:0,mes:0,acum:0,falta:0,sft:0,m2:0,m2con:0};ls.forEach(function(g){T.ci+=g.ci||0;T.mes+=g.mes;T.acum+=g.acum;T.falta+=g.falta||0;T.sft+=g.sft||0;if(g.m2){T.m2+=g.m2;T.m2con+=g.mes;}});
   var nv=ls.filter(function(g){return g.venta;}).length,per=CV.ym.length===4?'año':'mes';
   var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Lotes del '+per+'</h2><div class="card-sub">Lotes con dinero de ventas en el banco · el precio por m² es lo que entró entre los m²</div></div></div>';
@@ -2224,7 +2241,7 @@ function lotesMesHtml(partes){
   h+='<div class="tablewrap lotesmes"><table class="table cards"><thead><tr><th>Lote · cliente</th><th class="num">m²</th><th class="num">Entró en el '+per+'</th><th class="num">S/ por m²</th><th class="num">Inicial pactada</th><th class="num">Acumulado</th><th class="num">Falta de inicial</th><th class="num">Saldo a financiar</th></tr></thead><tbody>'
     +ls.map(function(g){var av=g.ci?Math.min(100,g.acum/g.ci*100):null,dif=g.evolta!=null&&Math.abs(g.evolta-g.acum)>Math.max(50,g.acum*0.01);
       return '<tr><td class="full"><b>'+esc(g.lote||'—')+'</b> <span class="pill '+(g.venta?'ok':'warn')+'">'+(g.venta?'Venta':'Separación')+'</span>'+(g.sinMinuta?' <span class="pill neutral" title="Ya pagó S/ 10,000 o más, pero en Evolta sigue sin minuta">Sin minuta</span>':'')+(!g.c?' <span class="pill ex" title="No está en el Flujo de Caja de Evolta">No está en Evolta</span>':'')
-        +'<div class="sub">'+esc(g.cli||'')+(g.etapa?' · '+esc(g.etapa):'')+(g.fecha?' · desde '+dmy(g.fecha):'')+'</div></td>'
+        +'<div class="sub">'+esc(g.cli||'')+(g.etapa?' · '+esc(g.etapa):'')+(g.fecha?' · primer pago '+dmy(g.fecha):'')+(g.oc?' · OC activa':'')+'</div></td>'
         +'<td class="num" data-l="m²">'+(g.m2?nf(g.m2):'—')+'</td>'
         +'<td class="num" data-l="Entró en el '+per+'"><b>'+S(g.mes)+'</b><div class="sub">'+g.dep+' depósito'+(g.dep!==1?'s':'')+'</div></td>'
         +'<td class="num" data-l="S/ por m²"><b>'+(g.pm2!=null?S(g.pm2):'—')+'</b></td>'
@@ -2250,7 +2267,7 @@ function desistidosPeriodo(enP){
 // Indicadores de ventas del periodo, guiados por el dinero del banco
 function erVentasHtml(movs,partes){
   var enP=periodoConc(),LV=lotesVentas(partes),des=desistidosPeriodo(enP),fin={};
-  var A=areasConTC(movs,cambiosMoneda(enP)),gV=A['VENTAS'].eq,gM=A['MKT'].eq,n=LV.ls.length,T=LV.T,nc=contratosPeriodo(enP).length;
+  var A=areasConTC(movs,cambiosMoneda(enP)),gV=A['VENTAS'].eq,gM=A['MKT'].eq,n=LV.ls.length,T=LV.T,nc=n;
   LV.ls.forEach(function(g){var c=g.c;var t=!c?'Sin contrato':/HIPOTEC/i.test(c.tipo_fin)?'Hipotecario':/DIRECTO/i.test(c.tipo_fin)?'Directo':(c.tipo_fin||'Otro');fin[t]=(fin[t]||0)+1;});
   var pagoDes={};partes.forEach(function(x){if(x.c)String(x.c.lotes).split(' + ').forEach(function(l){var k=cLoteKey(x.c.etapa,l);pagoDes[k]=(pagoDes[k]||0)+x.s;});});
   var top=LV.ls.slice().filter(function(g){return g.pm2!=null;}).sort(function(a,b){return b.pm2-a.pm2;});
@@ -2260,7 +2277,7 @@ function erVentasHtml(movs,partes){
     +'<div><span>Ventas en el banco</span><b>'+S(T.mes+LV.sinLote)+'</b><em>'+n+' lote'+(n!==1?'s':'')+(T.m2?' · '+m2t(T.m2):'')+'</em></div>'
     +'<div><span>Precio por m² (lo que entró)</span><b>'+(T.m2?S(T.m2con/T.m2):'—')+'</b><em>'+(top.length?'de '+S(top[top.length-1].pm2)+' a '+S(top[0].pm2)+' según el lote':'')+'</em></div>'
     +'<div><span>Promedio por lote</span><b>'+(n?S(T.mes/n):'—')+'</b><em>lo que entró por cada lote</em></div>'
-    +'<div><span>Costo de vender (Ventas + Mkt)</span><b>'+(nc?S((gV+gM)/nc):'—')+'</b><em>por contrato nuevo ('+nc+') · '+((T.mes+LV.sinLote)?((gV+gM)/(T.mes+LV.sinLote)*100).toFixed(1):'0')+'% de las ventas del banco</em></div>'
+    +'<div><span>Costo de vender (Ventas + Mkt)</span><b>'+(nc?S((gV+gM)/nc):'—')+'</b><em>por lote vendido según el banco ('+nc+') · '+((T.mes+LV.sinLote)?((gV+gM)/(T.mes+LV.sinLote)*100).toFixed(1):'0')+'% de las ventas del banco</em></div>'
     +'<div><span>Desistimientos</span><b>'+des.length+'</b><em>'+(des.length?des.map(function(d){var k=cLoteKey(d.v.etapa,d.v.lote);return esc(d.v.lote)+' '+esc(String(d.v.titular||'').split(' ').slice(0,2).join(' '))+' · '+m2t(d.m2)+' · '+(pagoDes[k]?'pagó '+S(pagoDes[k]):'no pagó nada');}).join('; '):'ninguno en el periodo')+'</em></div>'
     +'<div><span>Forma de pago</span><b>'+(Object.keys(fin).map(function(k){return fin[k]+' '+k.toLowerCase();}).join(' · ')||'—')+'</b><em>lotes con ventas en el periodo</em></div>'
     +'</div>'
@@ -2416,7 +2433,8 @@ function renderConcDet(){
   var ing=ingresosConc().filter(function(m){if(!enP(m.fecha))return false;
     if(CV.tipo==='vc')return esClienteIng(m);if(CV.tipo==='todos')return true;return m.clas===CV.tipo;}).sort(function(a,b){return a.fecha<b.fecha?-1:a.fecha>b.fecha?1:0;});
   var evs=Object.keys(CONC.pagos).map(function(k){return CONC.pagos[k];}).filter(function(p){return enP(p.fecha)&&!links[p.k];}).sort(function(a,b){return a.fecha<b.fecha?-1:1;});
-  function estOK(m){var r=CONC.rows[m.sig];if(CV.est==='dob')return dobleEnMov(m.sig,dob);if(CV.est==='pend')return !r;if(CV.est==='conf')return porConfirmar(r);if(CV.est==='ok')return r&&r.tipo==='evolta'&&!porConfirmar(r);if(CV.est==='marc')return r&&r.tipo!=='evolta';return true;}
+  var sug=clasSugeridas(repartoIngresos());function difClas(m){var s=sug[m.sig];return !!s&&(m.clas==='VENTAS'||m.clas==='COBRANZA'||!m.clas)&&m.clas!==s;}
+  function estOK(m){var r=CONC.rows[m.sig];if(CV.est==='vc')return difClas(m);if(CV.est==='dob')return dobleEnMov(m.sig,dob);if(CV.est==='pend')return !r;if(CV.est==='conf')return porConfirmar(r);if(CV.est==='ok')return r&&r.tipo==='evolta'&&!porConfirmar(r);if(CV.est==='marc')return r&&r.tipo!=='evolta';return true;}
   var nB=ing.filter(function(m){return !CONC.rows[m.sig];}).length,nE=evs.filter(function(p){return !p.rev_estado;}).length;
   var h='<div class="card-head"><div><h2 class="card-title">¿De quién es cada ingreso?</h2><div class="card-sub">Toca una fila para '+(READONLY?'ver el detalle':'asignarla o corregirla')+'</div></div>'
     +'<label class="search">'+ico('magnifying-glass')+'<input id="cq" placeholder="Buscar cliente, lote, monto, descripción…" value="'+esc(CV.q)+'"></label></div>'
@@ -2424,14 +2442,15 @@ function renderConcDet(){
   var body='';
   if(CV.lado==='banco'){
     var base=ing.filter(function(m){return !q||concTexto(m,destinoConc(m,ix)).indexOf(q)!==-1;});
-    function ch(k,l){var n=base.filter(function(m){var r=CONC.rows[m.sig];return k==='todos'||(k==='dob'?dobleEnMov(m.sig,dob):k==='pend'?!r:k==='conf'?porConfirmar(r):k==='ok'?r&&r.tipo==='evolta'&&!porConfirmar(r):r&&r.tipo!=='evolta');}).length;return '<button class="chip'+(CV.est===k?' on':'')+'" data-e="'+k+'">'+l+'<span class="c'+((k==='pend'||k==='conf'||k==='dob')&&n?' red':'')+'">'+n+'</span></button>';}
-    body+='<div class="chips">'+ch('pend','Pendientes')+ch('conf','Por confirmar')+ch('ok','Conciliados')+ch('marc','Asignados o marcados')+ch('todos','Todos')+(base.some(function(m){return dobleEnMov(m.sig,dob);})||CV.est==='dob'?ch('dob','Pago usado dos veces'):'')
+    function ch(k,l){var n=base.filter(function(m){var r=CONC.rows[m.sig];return k==='todos'||(k==='vc'?difClas(m):k==='dob'?dobleEnMov(m.sig,dob):k==='pend'?!r:k==='conf'?porConfirmar(r):k==='ok'?r&&r.tipo==='evolta'&&!porConfirmar(r):r&&r.tipo!=='evolta');}).length;return '<button class="chip'+(CV.est===k?' on':'')+'" data-e="'+k+'">'+l+'<span class="c'+((k==='pend'||k==='conf'||k==='dob'||k==='vc')&&n?' red':'')+'">'+n+'</span></button>';}
+    body+='<div class="chips">'+ch('pend','Pendientes')+ch('conf','Por confirmar')+ch('ok','Conciliados')+ch('marc','Asignados o marcados')+ch('todos','Todos')+(base.some(function(m){return dobleEnMov(m.sig,dob);})||CV.est==='dob'?ch('dob','Pago usado dos veces'):'')+(base.some(difClas)||CV.est==='vc'?ch('vc','Venta/cobranza por revisar'):'')
       +'<select id="ctipo" class="chipsel"><option value="vc">Ventas y cobranza</option><option value="VENTAS">Solo ventas</option><option value="COBRANZA">Solo cobranza</option><option value="FINANCIAMIENTO">Financiamiento</option><option value="todos">Todos los ingresos</option></select></div>';
     var lista=base.filter(estOK);
+    if(CV.est==='vc'&&lista.length)body+='<div class="alert warn" style="margin-bottom:10px;align-items:center">'+ico('info')+'<span>Según el banco: es <b>venta</b> lo que entra dentro de los 60 días del primer pago del lote; las cuotas de financiamiento o saldo y lo que llega después es <b>cobranza</b>.</span>'+(READONLY?'':'<button class="btn btn-brand btn-sm" id="cvcAplicar" style="margin-left:auto;flex-shrink:0">Aplicar las '+lista.length+' sugerencias</button>')+'</div>';
     if(!lista.length)body+=emptyHtml(CV.est==='pend'?'check-circle':'magnifying-glass',CV.est==='pend'?'No hay ingresos pendientes':'No hay ingresos con este filtro',CV.est==='pend'?'Todo el dinero de este periodo tiene cliente asignado.':'');
     else{
       body+='<div class="tablewrap only-d"><table class="table"><thead><tr><th>Fecha</th><th>Ingreso en el banco</th><th class="num">Monto</th><th>Cliente · lote · cuota</th><th>Estado</th></tr></thead><tbody>'+lista.map(function(m){var d=destinoConc(m,ix);
-        return '<tr class="click" data-sig="'+encodeURIComponent(m.sig)+'"><td class="nowrap muted">'+dmy(m.fecha)+'</td><td style="min-width:160px"><div style="font-weight:700">'+esc(m.desc||m.mov)+'</div><div class="sub">'+esc(clasLabel(m.clas))+(m.numOp?' · Op. '+esc(m.numOp):'')+'</div></td><td class="num">'+montoHtml(m)+'</td><td>'+destHtml(d,m)+'</td><td>'+pillConc(m,dob)+'</td></tr>';}).join('')+'</tbody></table></div>'
+        return '<tr class="click" data-sig="'+encodeURIComponent(m.sig)+'"><td class="nowrap muted">'+dmy(m.fecha)+'</td><td style="min-width:160px"><div style="font-weight:700">'+esc(m.desc||m.mov)+'</div><div class="sub">'+esc(clasLabel(m.clas))+(difClas(m)?' · <b class="neg">sugerido: '+esc(clasLabel(sug[m.sig]))+'</b>':'')+(m.numOp?' · Op. '+esc(m.numOp):'')+'</div></td><td class="num">'+montoHtml(m)+'</td><td>'+destHtml(d,m)+'</td><td>'+pillConc(m,dob)+'</td></tr>';}).join('')+'</tbody></table></div>'
         +'<div class="mcards only-m">'+lista.map(function(m){var d=destinoConc(m,ix);return '<button class="mcard'+(CONC.rows[m.sig]?'':' rev')+'" data-sig="'+encodeURIComponent(m.sig)+'"><div class="l1"><span class="d">'+esc(m.desc||m.mov)+'</span>'+montoHtml(m)+'</div><div class="l2"><span>'+dmy(m.fecha)+'</span>'+pillConc(m,dob)+'</div>'+(d?'<div class="l3">'+destHtml(d,m)+'</div>':'')+'</button>';}).join('')+'</div>';
     }
   }else if(CV.lado==='cliente'){
@@ -2456,6 +2475,10 @@ function renderConcDet(){
   var cq=$('cq');cq.oninput=function(){CV.q=cq.value;var p=cq.selectionStart;renderConcDet();var n=$('cq');n.focus();try{n.setSelectionRange(p,p);}catch(e){}};
   Array.prototype.forEach.call(c.querySelectorAll('.concseg button'),function(b){b.onclick=function(){CV.lado=b.dataset.l;if(CV.lado==='evolta'&&CV.est==='ok')CV.est='pend';renderConcDet();};});
   Array.prototype.forEach.call(c.querySelectorAll('.chip[data-e]'),function(b){b.onclick=function(){CV.est=b.dataset.e;renderConcDet();};});
+  var cva=$('cvcAplicar');if(cva)cva.onclick=async function(){var ls=ing.filter(difClas);if(!confirm('¿Cambiar la clasificación de '+ls.length+' ingreso'+(ls.length!==1?'s':'')+' según el banco?'))return;
+    cva.disabled=true;setSync('guardando…');
+    for(var i=0;i<ls.length;i++){var m=ls[i],a=m.clas;m.clas=sug[m.sig];await updateMov(m);await registrarCambio('movimientos',m.sig,'clas_sugerida',{clas:a},{clas:m.clas});}
+    setSync('guardado ✓');renderActual();};
   var ct=$('ctipo');if(ct){ct.value=CV.tipo;ct.onchange=function(){CV.tipo=ct.value;renderConcDet();};}
   Array.prototype.forEach.call(c.querySelectorAll('[data-sig]'),function(r){r.onclick=function(){abrirConcMov(decodeURIComponent(r.dataset.sig));};});
   Array.prototype.forEach.call(c.querySelectorAll('[data-k]'),function(r){r.onclick=function(){abrirConcPago(decodeURIComponent(r.dataset.k));};});
