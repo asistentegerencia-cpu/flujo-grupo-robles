@@ -557,6 +557,9 @@ details.concsteps>:last-child{margin-bottom:18px}
 .destinos td .sub{font-size:11.5px}
 .destmas summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--gr-brand);padding:8px 0}
 @media (max-width:760px){.cuadre2{grid-template-columns:1fr}}
+details.plegable{margin-top:14px}
+details.plegable .plg-in{padding:0}
+@media(max-width:640px){details.plegable>:not(summary){margin-left:14px;margin-right:14px}details.plegable summary{padding:14px}}
 </style>
 </head>
 <body>
@@ -2227,6 +2230,8 @@ function distribucionHtml(movs){
   return h;
 }
 // Lotes del mes: los lotes con dinero de VENTAS en el banco; Evolta solo aporta m², precio e inicial pactada
+// Sección que se abre y se cierra; recuerda si quedó abierta
+function plegable(id,titulo,resumen,cuerpo){return '<details class="card concsteps plegable" data-sec="'+id+'"'+(CV.sec&&CV.sec[id]?' open':'')+'><summary><span class="card-title" style="font-size:16px">'+titulo+'</span><span class="muted" style="font-size:12.5px">'+resumen+'</span>'+ico('caret-down')+'</summary><div class="plg-in">'+cuerpo+'</div></details>';}
 function lotesMesHtml(partes){
   var fin=CV.ym.length===4?CV.ym+'-12-31':CV.ym+'-31',LV=lotesVentas(partes),acum={},pp=primerPagoBanco(partes),oc=ocActivas();
   partes.forEach(function(x){if(x.g&&x.m.fecha<=fin&&(x.cat==='inicial'||x.cat==='cuota'))acum[x.g]=(acum[x.g]||0)+x.s;});
@@ -2239,9 +2244,10 @@ function lotesMesHtml(partes){
     g.evolta=c?c.ci_cobrada:null;g.fecha=pp[g.k]||'';return g;});
   var T={ci:0,mes:0,acum:0,falta:0,sft:0,m2:0,m2con:0};ls.forEach(function(g){T.ci+=g.ci||0;T.mes+=g.mes;T.acum+=g.acum;T.falta+=g.falta||0;T.sft+=g.sft||0;if(g.m2){T.m2+=g.m2;T.m2con+=g.mes;}});
   var nv=ls.filter(function(g){return g.venta;}).length,per=CV.ym.length===4?'año':'mes';
-  var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Ventas nuevas del '+per+'</h2><div class="card-sub">Lotes cuyo primer pago entró al banco en el '+per+' · el precio por m² es lo que entró entre los m²</div></div></div>';
+  var tit='Ventas nuevas del '+per,res=ls.length+' venta'+(ls.length!==1?'s':'')+' nueva'+(ls.length!==1?'s':'')+' · '+S(T.mes)+(T.m2?' · '+S(T.m2con/T.m2)+' por m²':'');
+  var h='<p class="nota" style="margin-top:0">Lotes cuyo primer pago entró al banco en el '+per+' · el precio por m² es lo que entró entre los m².</p>';
   h+='<div class="vmini"><div><span>Lotes · ventas / separaciones</span><b>'+ls.length+' · '+nv+' / '+(ls.length-nv)+'</b></div><div><span>m²</span><b>'+(T.m2?nf(T.m2).replace(/\.00$/,''):'—')+'</b></div><div><span>Precio por m² (lo que entró)</span><b>'+(T.m2?S(T.m2con/T.m2):'—')+'</b></div></div>';
-  if(!ls.length)return h+emptyHtml('tray','Ninguna venta nueva en este periodo','Asigna los ingresos de ventas a su cliente y lote abajo.')+'</div>';
+  if(!ls.length)return plegable('lotes',tit,res,h+emptyHtml('tray','Ninguna venta nueva en este periodo','Asigna los ingresos de ventas a su cliente y lote abajo.'));
   h+='<div class="tablewrap lotesmes"><table class="table cards"><thead><tr><th>Lote · cliente</th><th class="num">m²</th><th class="num">Entró en el '+per+'</th><th class="num">S/ por m²</th><th class="num">Inicial pactada</th><th class="num">Acumulado</th><th class="num">Falta de inicial</th><th class="num">Saldo a financiar</th></tr></thead><tbody>'
     +ls.map(function(g){var av=g.ci?Math.min(100,g.acum/g.ci*100):null,dif=g.evolta!=null&&Math.abs(g.evolta-g.acum)>Math.max(50,g.acum*0.01);
       return '<tr><td class="full"><b>'+esc(g.lote||'—')+'</b> <span class="pill '+(g.venta?'ok':'warn')+'">'+(g.venta?'Venta':'Separación')+'</span>'+(g.sinMinuta?' <span class="pill neutral" title="Ya pagó S/ 10,000 o más, pero en Evolta sigue sin minuta">Sin minuta</span>':'')+(!g.c?' <span class="pill ex" title="No está en el Flujo de Caja de Evolta">No está en Evolta</span>':'')
@@ -2255,8 +2261,8 @@ function lotesMesHtml(partes){
         +'<td class="num muted" data-l="Saldo a financiar">'+(g.sft!=null?S(g.sft):'—')+'</td></tr>';}).join('')
     +'<tr class="total"><td>Total</td><td class="num" data-l="m²">'+(T.m2?nf(T.m2):'')+'</td><td class="num" data-l="Entró">'+S(T.mes)+'</td><td class="num" data-l="S/ por m²">'+(T.m2?S(T.m2con/T.m2):'')+'</td><td class="num" data-l="Inicial">'+S(T.ci)+'</td><td class="num" data-l="Acumulado">'+S(T.acum)+'</td><td class="num" data-l="Falta">'+S(T.falta)+'</td><td class="num" data-l="Saldo a financiar">'+S(T.sft)+'</td></tr></tbody></table></div>'
     +(LV.ant.n?'<p class="nota">No se listan <b>'+LV.ant.n+'</b> venta'+(LV.ant.n!==1?'s':'')+' de meses anteriores que siguen pagando su inicial ('+S(LV.ant.s)+'): '+LV.ant.ls.map(function(g){return esc(g.lote||'—')+' desde '+dmy(g.fecha);}).join(', ')+'.</p>':'')+(LV.sinLote>1?'<p class="nota"><b>'+S(LV.sinLote)+'</b> de ventas aún no tienen lote asignado: asígnalos abajo.</p>':'')
-    +'<p class="nota">El saldo a financiar (contracosecha) no entra a la empresa: va aparte y no se cuenta como falta. El acumulado suma todo lo que entró al banco para ese lote, incluidas las cuotas del crédito directo. Con S/ 10,000 o más pagados se considera venta aunque Evolta no tenga la minuta.</p></div>';
-  return h;
+    +'<p class="nota">El saldo a financiar (contracosecha) no entra a la empresa: va aparte y no se cuenta como falta. El acumulado suma todo lo que entró al banco para ese lote, incluidas las cuotas del crédito directo. Con S/ 10,000 o más pagados se considera venta aunque Evolta no tenga la minuta.</p>';
+  return plegable('lotes',tit,res,h);
 }
 // Contratos separados o vendidos en el periodo (base de "ventas del mes")
 function contratosPeriodo(enP){return CONC.contratos.filter(function(c){return enP(inicioContrato(c));});}
@@ -2282,10 +2288,9 @@ function erVentasHtml(movs,partes){
     +'<div><span>Precio por m² (lo que entró)</span><b>'+(T.m2?S(T.m2con/T.m2):'—')+'</b><em>'+(top.length?'de '+S(top[top.length-1].pm2)+' a '+S(top[0].pm2)+' según el lote':'')+'</em></div>'
     +'<div><span>Promedio por venta nueva</span><b>'+(n?S(T.mes/n):'—')+'</b><em>lo que entró por cada venta nueva</em></div>'
     +'<div><span>Costo de vender (Ventas + Mkt)</span><b>'+(nc?S((gV+gM)/nc):'—')+'</b><em>por venta nueva ('+nc+') · '+((T.mes+LV.sinLote+LV.ant.s)?((gV+gM)/(T.mes+LV.sinLote+LV.ant.s)*100).toFixed(1):'0')+'% de las ventas del banco</em></div>'
-    +'<div><span>Desistimientos</span><b>'+des.length+'</b><em>'+(des.length?des.map(function(d){var k=cLoteKey(d.v.etapa,d.v.lote);return esc(d.v.lote)+' '+esc(String(d.v.titular||'').split(' ').slice(0,2).join(' '))+' · '+m2t(d.m2)+' · '+(pagoDes[k]?'pagó '+S(pagoDes[k]):'no pagó nada');}).join('; '):'ninguno en el periodo')+'</em></div>'
     +'<div><span>Forma de pago</span><b>'+(Object.keys(fin).map(function(k){return fin[k]+' '+k.toLowerCase();}).join(' · ')||'—')+'</b><em>ventas nuevas del periodo</em></div>'
     +'</div>'
-    +'<p class="nota">Un desistimiento es una OC devuelta en Evolta cuyo lote quedó libre; se indica cuánto había pagado en el banco.</p></div>';
+    +'</div>';
 }
 // Cartera de todos los contratos e inventario disponible (foto a hoy)
 function carteraHtml(){
@@ -2324,18 +2329,24 @@ function cuadreBancoHtml(){
       +'<tr class="tot"><td>Diferencia</td><td class="num">'+(dif==null?'—':Math.abs(dif)<0.01?'<span class="pos">'+ico('check')+' cuadra</span>':'<b class="neg">'+F(dif)+'</b>')+'</td></tr>'
       +'</tbody></table></div>';
   }
+  return '<div class="card"><div class="card-head"><div><h2 class="card-title">Cuadre del banco</h2><div class="card-sub">Saldo inicial + lo que entró − lo que salió = saldo final · según los estados de cuenta</div></div></div>'
+    +'<div class="cuadre2">'+lado('S')+lado('U')+'</div>'
+    +'<p class="nota">Si la diferencia no cuadra, falta cargar algún movimiento o el saldo final del mes.</p></div>';
+}
+// A dónde fue el dinero: salidas del periodo agrupadas por destinatario
+function destinosHtml(){
+  var anual=CV.ym.length===4,enP=periodoConc(),ms=allMovs().filter(function(m){return enP(m.fecha);});
+  var yFin=anual?(concMesesDisp().filter(function(y){return y.slice(0,4)===CV.ym;}).pop()||CV.ym+'-12'):CV.ym;
   // A dónde fue el dinero: salidas agrupadas por destinatario (dólares al TC pagado del periodo)
   var cm=cambiosMoneda(enP),tc=cm.tc||getTC(anual?yFin:CV.ym),D={};
   ms.forEach(function(m){if(!(m.cargo>0))return;var k=destinoMov(m),d=D[k]=D[k]||{k:k,s:0,n:0,areas:{}};d.s+=m.moneda==='USD'?m.cargo*tc:m.cargo;d.n++;
     var a=m.area==='CAMBIO'?'Cambio de moneda':m.esFijo?'Costo fijo':areaLabel(m.area);d.areas[a]=(d.areas[a]||0)+1;});
   var ls=Object.keys(D).map(function(k){return D[k];}).sort(function(a,b){return b.s-a.s;}),tot=ls.reduce(function(a,d){return a+d.s;},0);
   function fila(d){return '<tr><td><b>'+esc(d.k)+'</b><div class="sub">'+Object.keys(d.areas).map(esc).join(' · ')+'</div></td><td class="num">'+d.n+'</td><td class="num">'+S(d.s)+'</td><td class="num muted3">'+(tot?(d.s/tot*100).toFixed(1)+'%':'')+'</td></tr>';}
-  return '<div class="card"><div class="card-head"><div><h2 class="card-title">Cuadre del banco</h2><div class="card-sub">Saldo inicial + lo que entró − lo que salió = saldo final · según los estados de cuenta</div></div></div>'
-    +'<div class="cuadre2">'+lado('S')+lado('U')+'</div>'
-    +'<h3 class="cuadre-h">¿A dónde fue el dinero?</h3><div class="tablewrap"><table class="table cards destinos"><thead><tr><th>Destinatario · área</th><th class="num">Pagos</th><th class="num">Monto S/</th><th class="num">%</th></tr></thead><tbody>'
+  return plegable('dest','¿A dónde fue el dinero?',ls.length+' destinatarios · '+S(tot)+' en salidas','<div class="tablewrap"><table class="table cards destinos"><thead><tr><th>Destinatario · área</th><th class="num">Pagos</th><th class="num">Monto S/</th><th class="num">%</th></tr></thead><tbody>'
     +ls.slice(0,12).map(fila).join('')+'</tbody></table></div>'
     +(ls.length>12?'<details class="destmas"><summary>Ver los '+(ls.length-12)+' destinatarios restantes</summary><div class="tablewrap"><table class="table cards destinos"><tbody>'+ls.slice(12).map(fila).join('')+'</tbody></table></div></details>':'')
-    +'<p class="nota">Las salidas en dólares se muestran en soles al TC pagado'+(cm.tc?' ('+cm.tc.toFixed(3)+')':'')+'. Si la diferencia no cuadra, falta cargar algún movimiento o el saldo final del mes.</p></div>';
+    +'<p class="nota">Las salidas en dólares se muestran en soles al TC pagado'+(cm.tc?' ('+cm.tc.toFixed(3)+')':'')+'. El cambio de moneda aparece como salida a la casa de cambio.</p>');
 }
 
 // ============ Conciliación: datos ============
@@ -2410,9 +2421,10 @@ function renderConc(){
     +'</div>';
   var ban=(nDob?'<div class="banner neg"><div class="bi">'+ico('copy')+'</div><div class="bt"><b>'+nDob+' ingreso'+(nDob>1?'s usan':' usa')+' un pago de Evolta que ya se usó en otro depósito</b><span>El mismo pago no puede justificar dos depósitos. Filtra por <a href="#" id="verDob">Pago usado dos veces</a> y corrige a qué cliente o cuota corresponde.</span></div></div>':'')+((nPend||evSinPend.length||nConf||nDob)?'<div class="banner warn"><div class="bi">'+ico('warning')+'</div><div class="bt"><b>'+mesLargo(CV.ym).replace('—',CV.ym)+' aún no cuadra</b><span>Revisa '+(nPend?nPend+' ingreso'+(nPend>1?'s':'')+' sin cliente':'')+(nPend&&evSinPend.length?' y ':'')+(evSinPend.length?evSinPend.length+' pago'+(evSinPend.length>1?'s':'')+' de Evolta que no aparecen en el banco':'')+(nConf?((nPend||evSinPend.length)?', y ':'')+'confirma '+nConf+' cruce'+(nConf>1?'s':'')+' donde depositó otra persona':'')+(nDob&&!nPend&&!evSinPend.length&&!nConf?'el pago de Evolta usado dos veces':'')+'. Toca cada fila para corregirla.</span></div></div>'
     :'<div class="banner pos"><div class="bi">'+ico('check-circle')+'</div><div class="bt"><b>'+(CV.ym.length===4?'Año '+CV.ym:mesLargo(CV.ym))+' cuadrado</b><span>Todo ingreso de clientes tiene cliente y lote, y todo pago de Evolta está en el banco o revisado.</span></div></div>');
-  box.innerHTML=pasos+strip+kp+ban+'<div class="grid2">'+estadoResultadosHtml(movsP,partes)+'<div class="colstack">'+erVentasHtml(movsP,partes)+distribucionHtml(movsP)+'</div></div><div class="grid-er">'+cuadreBancoHtml()+lotesMesHtml(partes)+carteraHtml()+'</div><div class="card" id="concDet"></div>';
+  box.innerHTML=pasos+strip+kp+ban+'<div class="grid2">'+estadoResultadosHtml(movsP,partes)+'<div class="colstack">'+erVentasHtml(movsP,partes)+distribucionHtml(movsP)+'</div></div><div class="grid-er">'+cuadreBancoHtml()+carteraHtml()+'</div>'+destinosHtml()+lotesMesHtml(partes)+'<div class="card" id="concDet"></div>';
   Array.prototype.forEach.call(box.querySelectorAll('.mchip'),function(b){b.onclick=function(){CV.ym=b.dataset.ym;renderConc();};});
   var dp=$('concPasos');dp.ontoggle=function(){CV.pasos=dp.open;};
+  Array.prototype.forEach.call(box.querySelectorAll('details.plegable'),function(d){d.ontoggle=function(){CV.sec=CV.sec||{};CV.sec[d.dataset.sec]=d.open;};});
   var go=box.querySelector('[data-go]');if(go)go.onclick=function(e){e.preventDefault();irA('cargar');};
   var ef=$('evFile');if(ef)ef.onchange=function(){if(ef.files.length)subirEvolta(ef.files);};
   var ea=$('evAuto');if(ea)ea.onclick=conciliarAutomatico;
