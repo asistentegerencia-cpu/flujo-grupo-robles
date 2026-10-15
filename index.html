@@ -562,6 +562,36 @@ details.plegable .plg-in{padding:0}
 @media(max-width:640px){details.plegable>:not(summary){margin-left:14px;margin-right:14px}details.plegable summary{padding:14px}}
 .ci-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 #concModal .modal{display:flex;flex-direction:column;gap:12px}
+
+/* Lotes */
+.ltseg{align-self:flex-start;flex-wrap:wrap}
+.ltseg .c{font-size:11px;font-weight:700;opacity:.6;margin-left:2px}
+.ltgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:16px;margin:12px 0}
+.ltgrid.sinplano{grid-template-columns:1fr}
+.ltmapbox{position:relative;border:1px solid var(--gr-border);border-radius:12px;background:var(--gr-surface-2);overflow:hidden}
+.ltzoom{position:absolute;top:8px;right:8px;display:flex;gap:6px;z-index:2}
+.ltmap{height:640px;overflow:auto;-webkit-overflow-scrolling:touch}
+.ltmap svg{display:block;width:auto;margin:0 auto}
+.ltmap polygon{stroke:#fff;stroke-width:2;fill-opacity:.85;cursor:pointer;transition:fill-opacity .15s}
+.ltmap polygon:hover{fill-opacity:1;stroke:#0f172a}
+.ltmap polygon.off{fill-opacity:.15}
+.ltmap polygon.sel{stroke:#0f172a;stroke-width:6;fill-opacity:1}
+.ltmap .ltmz{font-size:64px;font-weight:800;fill:#0f172a;opacity:.35;text-anchor:middle;pointer-events:none}
+.ltmap .ltnum{font-size:13px;font-weight:700;fill:#0f172a;text-anchor:middle;pointer-events:none}
+.ltficha{border:1px solid var(--gr-border);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;background:var(--gr-surface);align-self:start}
+.ltvacio{display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--gr-text-2);padding:30px 10px;text-align:center}
+.ltvacio .ph{font-size:28px}
+.ltf-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.ltf-lote{font-size:22px;font-weight:800;margin-bottom:4px}
+.ltkv{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
+.ltsec{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--gr-border);padding-top:10px}
+.ltcli{font-weight:700}
+.ltbig{font-size:20px;font-weight:800}
+.ltmovs{display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto}
+.ltmov{display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid var(--gr-border);background:var(--gr-surface);border-radius:8px;padding:7px 10px;font-size:13px;text-align:left;cursor:pointer}
+.ltmov em{display:block;font-style:normal;font-size:11.5px;color:var(--gr-text-2)}
+.ltlist tr.sel td{background:var(--gr-brand-100)}
+@media (max-width:1000px){.ltgrid{grid-template-columns:1fr}.ltmap{height:460px}}
 </style>
 </head>
 <body>
@@ -639,6 +669,7 @@ details.plegable .plg-in{padding:0}
       <section class="view" id="v-ventas"><div id="ventasBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
       <section class="view" id="v-cobranza"><div id="cobranzaBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
       <section class="view" id="v-conc"><div id="concBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
+      <section class="view" id="v-lotes"><div id="lotesBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
       <section class="view" id="v-cac"><div id="cacBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
       <section class="view" id="v-fijos"><div id="fijosBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
 
@@ -679,6 +710,7 @@ details.plegable .plg-in{padding:0}
       <button data-v="cobranza"><i class="ph ph-hand-coins"></i>Cobranza</button>
       <button data-v="cac"><i class="ph ph-target"></i>CAC / RPA</button>
       <button data-v="conc"><i class="ph ph-scales"></i>Conciliación</button>
+      <button data-v="lotes"><i class="ph ph-map-trifold"></i>Lotes</button>
     </div>
     <div class="usr"><div class="avatar" id="mAvatar">·</div><div class="t"><b id="mMail"></b><span id="mRolTxt"></span></div><button class="btn btn-secondary btn-sm" id="salirM">Salir</button></div>
   </div>
@@ -1076,10 +1108,11 @@ var VIEWS={
   cobranza:{t:'Cobranza',s:'Cuotas de clientes y financiamiento',ic:'hand-coins',lbl:'Cobranza',f:true},
   cac:{t:'CAC / RPA',s:'Costo de adquisición y rentabilidad por asesor',ic:'target',lbl:'CAC / RPA',f:true},
   conc:{t:'Conciliación',s:'Con el banco · cuadre, resultado y ventas nuevas del mes',ic:'scales',lbl:'Conciliación',f:false},
+  lotes:{t:'Lotes',s:'Estado, m², cliente y lo que entró al banco por cada lote',ic:'map-trifold',lbl:'Lotes',f:false},
   fijos:{t:'Costos fijos',s:'Cuánto cuesta la oficina y a quién le toca',ic:'buildings',lbl:'Costos fijos',f:true},
   consol:{t:'Consolidado',s:'Visión anual · dólares convertidos a S/ con el TC del mes',ic:'chart-bar',lbl:'Consolidado',f:false}
 };
-var ORDEN=['cargar','mes','ventas','cobranza','conc','cac','fijos','consol'];
+var ORDEN=['cargar','mes','ventas','cobranza','conc','lotes','cac','fijos','consol'];
 function buildNav(){
   $('sbNav').innerHTML=ORDEN.filter(function(v){return !(READONLY&&v==='cargar');}).map(function(v){return '<button data-v="'+v+'">'+ico(VIEWS[v].ic)+VIEWS[v].lbl+'</button>';}).join('');
   Array.prototype.forEach.call(document.querySelectorAll('#sbNav button,#bNav button,#masSheet .grid3 button'),function(b){b.onclick=function(){irA(b.dataset.v);};});
@@ -1096,7 +1129,7 @@ function irA(v){
   cerrarMas();
   if(v==='cargar'&&READONLY)v='mes';
   VISTA=v;SEL=null;cerrarPanelMovil();
-  var enMas=(v==='cargar'||v==='cobranza'||v==='cac'||v==='conc');
+  var enMas=(v==='cargar'||v==='cobranza'||v==='cac'||v==='conc'||v==='lotes');
   Array.prototype.forEach.call(document.querySelectorAll('#sbNav button'),function(b){b.classList.toggle('on',b.dataset.v===v);});
   Array.prototype.forEach.call(document.querySelectorAll('#bNav button'),function(b){b.classList.toggle('on',b.dataset.v===v||(enMas&&b.dataset.v==='mas'));});
   Array.prototype.forEach.call(document.querySelectorAll('.view'),function(s){s.classList.toggle('on',s.id==='v-'+v);});
@@ -1107,7 +1140,7 @@ function irA(v){
   renderVista();window.scrollTo(0,0);
 }
 function renderVista(){var v=VISTA;
-  if(v==='mes')renderMes();else if(v==='ventas')renderVentas();else if(v==='cobranza')renderCobranza();else if(v==='cac')renderCAC();else if(v==='conc')renderConc();else if(v==='fijos')renderFijos();else if(v==='consol')renderConsol();}
+  if(v==='mes')renderMes();else if(v==='ventas')renderVentas();else if(v==='cobranza')renderCobranza();else if(v==='cac')renderCAC();else if(v==='conc')renderConc();else if(v==='lotes')renderLotes();else if(v==='fijos')renderFijos();else if(v==='consol')renderConsol();}
 function renderActual(){var y=window.scrollY;renderVista();window.scrollTo(0,y);}
 function abrirMas(){$('masSheet').classList.add('open');$('masBg').classList.add('open');}
 function cerrarMas(){$('masSheet').classList.remove('open');$('masBg').classList.remove('open');}
@@ -1953,7 +1986,7 @@ async function registrarCambio(tabla,clave,accion,antes,despues){
 
 // ============ Ventas por lote, con lo anotado en Movimientos ============
 // Una venta = un lote (o, si aún no tiene lote, el cliente)
-function loteKey(m){var l=cNorm(m.lote).replace(/\s+/g,'');if(l)return 'L|'+l;var c=cNorm(m.cliente).replace(/[^A-Z ]/g,'').replace(/\s+/g,' ').trim();return c?'C|'+c:'';}
+function loteKey(m){var l=cNorm(String(m.lote||'').replace(/ñ/gi,'NY')).replace(/\s+/g,'');if(l)return 'L|'+l;var c=cNorm(m.cliente).replace(/[^A-Z ]/g,'').replace(/\s+/g,' ').trim();return c?'C|'+c:'';}
 function esVentaCob(m){return m.abono>0&&(m.clas==='VENTAS'||m.clas==='COBRANZA');}
 // Primer pago de cada venta en el banco (todos los meses cargados)
 function primerPagoLote(){var o={};allMovs().forEach(function(m){if(!esVentaCob(m))return;var k=loteKey(m);if(!k)return;if(!o[k]||m.fecha<o[k])o[k]=m.fecha;});return o;}
@@ -2220,6 +2253,131 @@ function destinosHtml(){
     +ls.slice(0,12).map(fila).join('')+'</tbody></table></div>'
     +(ls.length>12?'<details class="destmas"><summary>Ver los '+(ls.length-12)+' destinatarios restantes</summary><div class="tablewrap"><table class="table cards destinos"><tbody>'+ls.slice(12).map(fila).join('')+'</tbody></table></div></details>':'')
     +'<p class="nota">Las salidas en dólares se muestran en soles al TC pagado'+(cm.tc?' ('+cm.tc.toFixed(3)+')':'')+'. El cambio de moneda aparece como salida a la casa de cambio.</p>');
+}
+
+// ============ Lotes: estado, cliente y lo que entró al banco por cada lote ============
+// Estado, m² y precio: Stock de Evolta · cliente y pagado según Evolta: Flujo de Caja · dinero: Movimientos (banco)
+var LT={etapa:'ETAPA III',q:'',est:'',sel:null,stock:null,contratos:null,planos:{},zoom:1,cargando:false,error:''};
+var LT_ETAPAS=[['ETAPA I','Etapa I'],['ETAPA II','Etapa II'],['ETAPA II - MACROLOTES','Macrolotes'],['ETAPA III','Etapa III']];
+var LT_PLANOS={'ETAPA III':'lotes_e3.json'};
+var LT_EST={
+  DISPONIBLE:{l:'Disponible',c:'#22c55e',p:'ok'},
+  SEPARACION:{l:'Separación',c:'#f59e0b',p:'warn'},
+  'PAGANDO SIN MINUTA':{l:'Pagando sin minuta',c:'#3b82f6',p:'brand'},
+  MINUTA:{l:'Vendido (minuta)',c:'#64748b',p:'na'},
+  NOEVOLTA:{l:'No está en Evolta',c:'#e2e8f0',p:'neutral'}};
+var LT_ORDEN=['DISPONIBLE','SEPARACION','PAGANDO SIN MINUTA','MINUTA','NOEVOLTA'];
+async function ltTodo(tabla){var out=[],d=0;for(;;){var q=await sb.from(tabla).select('*').range(d,d+999);if(q.error)throw q.error;out=out.concat(q.data||[]);if(!q.data||q.data.length<1000)break;d+=1000;}return out;}
+function ltEtapa(s){return cNorm(s).replace(/\s+/g,' ').trim();}
+function ltNom(s){return cNorm(String(s==null?'':s).replace(/ñ/gi,'NY')).replace(/\s+/g,'');}
+function ltEstado(x){var e=cNorm(x&&x.estado).trim();return x?(LT_EST[e]?e:'MINUTA'):'NOEVOLTA';}
+async function ltCargar(){
+  if(LT.cargando)return;LT.cargando=true;LT.error='';
+  try{
+    var st=await ltTodo('evolta_stock'),ct=await ltTodo('evolta_contratos');
+    LT.stock=st.map(function(x){return {etapa:ltEtapa(x.etapa),lote:x.lote,m2:x.m2!=null?+x.m2:null,precio:x.precio!=null?+x.precio:null,moneda:x.moneda||'PEN',estado:x.estado||''};});
+    LT.contratos=ct.map(function(c){['precio','pagado','saldo','ci_total','ci_cobrada','sf_total','sf_cobrada'].forEach(function(k){c[k]=c[k]!=null?+c[k]:null;});c.etapaN=ltEtapa(c.etapa);return c;});
+  }catch(e){LT.error=e.message||String(e);}
+  LT.cargando=false;
+}
+async function ltPlano(et){
+  if(!LT_PLANOS[et]||LT.planos[et])return;
+  try{var r=await fetch(LT_PLANOS[et]);if(r.ok)LT.planos[et]=await r.json();}catch(e){}
+}
+// Índices: lote → contrato y lote → depósitos del banco
+function ltIndices(){
+  var porNom={},ct={},banco={};
+  LT.stock.forEach(function(x){(porNom[ltNom(x.lote)]=porNom[ltNom(x.lote)]||[]).push(x);});
+  LT.contratos.forEach(function(c){String(c.lotes||'').split('+').forEach(function(l){var k=c.etapaN+'|'+ltNom(l);if(!ct[k]||(c.fecha_venta||c.fecha_sep||'')>(ct[k].fecha_venta||ct[k].fecha_sep||''))ct[k]=c;});});
+  function toks(s){return cNorm(s).split(/[^A-Z]+/).filter(function(t){return t.length>=4;});}
+  allMovs().forEach(function(m){if(!(m.abono>0)||!(m.clas==='VENTAS'||m.clas==='COBRANZA')||!m.lote)return;
+    var partes=String(m.lote).split('+').map(function(s){return s.trim();}).filter(Boolean),s=solesDe(m)/partes.length;
+    partes.forEach(function(p){var cs=porNom[ltNom(p)]||[],x=null;
+      if(cs.length===1)x=cs[0];
+      else if(cs.length>1){var tm=toks(m.cliente);var hit=cs.filter(function(y){var c=ct[y.etapa+'|'+ltNom(y.lote)];if(!c)return false;var tc=toks(c.titular);return tm.some(function(t){return tc.indexOf(t)!==-1;});});if(hit.length===1)x=hit[0];}
+      if(!x)return;var k=x.etapa+'|'+ltNom(x.lote);(banco[k]=banco[k]||{s:0,ms:[]});banco[k].s+=s;banco[k].ms.push(m);});});
+  return {ct:ct,banco:banco};
+}
+function ltFilas(et,ix){
+  var pl=LT.planos[et],st={},out=[];
+  LT.stock.forEach(function(x){if(x.etapa===et)st[ltNom(x.lote)]=x;});
+  var vistos={};
+  if(pl)pl.lots.forEach(function(p){var k=ltNom(p[0]);vistos[k]=1;var x=st[k];out.push(ltFila(et,p[0],x,ix,p));});
+  Object.keys(st).forEach(function(k){if(!vistos[k])out.push(ltFila(et,st[k].lote,st[k],ix,null));});
+  return out.sort(function(a,b){return a.lote.localeCompare(b.lote,'es',{numeric:true});});
+}
+function ltFila(et,lote,x,ix,p){var k=et+'|'+ltNom(lote),c=ix.ct[k],b=ix.banco[k];
+  return {lote:lote.replace(/_$/,''),raw:lote,key:k,x:x,est:ltEstado(x),m2:x&&x.m2!=null?x.m2:(p?p[1]:null),precio:x?x.precio:null,moneda:x?x.moneda:'PEN',c:c,banco:b?b.s:0,ms:b?b.ms:[],poly:p?p[2]:null};}
+function ltPrecio(f){return f.precio==null?'—':(f.moneda==='USD'?U(f.precio):S(f.precio));}
+function ltPasa(f){var q=LT.q.trim().toLowerCase();if(LT.est&&f.est!==LT.est)return false;if(!q)return true;return (f.lote+' '+(f.c?f.c.titular:'')).toLowerCase().indexOf(q)!==-1;}
+
+function renderLotes(){
+  var box=$('lotesBody');if(!box)return;
+  if(!LT.stock){box.innerHTML='<div class="card">'+emptyHtml('spinner','Cargando lotes…','')+'</div>';
+    ltCargar().then(function(){return ltPlano(LT.etapa);}).then(function(){if(VISTA==='lotes')renderLotes();});return;}
+  if(LT.error){box.innerHTML='<div class="card">'+emptyHtml('warning','No se pudieron cargar los lotes',esc(LT.error))+'</div>';return;}
+  if(LT_PLANOS[LT.etapa]&&!LT.planos[LT.etapa]){ltPlano(LT.etapa).then(function(){if(VISTA==='lotes'&&LT.planos[LT.etapa])renderLotes();});}
+  var ix=ltIndices(),et=LT.etapa,filas=ltFilas(et,ix),pl=LT.planos[et];
+  var cnt={};LT_ETAPAS.forEach(function(e){cnt[e[0]]=LT.stock.filter(function(x){return x.etapa===e[0];}).length;});
+  var porEst={},m2Disp=0,valDisp=0,banco=0;filas.forEach(function(f){porEst[f.est]=(porEst[f.est]||0)+1;if(f.est==='DISPONIBLE'){m2Disp+=f.m2||0;valDisp+=f.precio?(f.moneda==='USD'?f.precio*getTC(ym(new Date().toISOString())):f.precio):0;}banco+=f.banco;});
+  var vend=(porEst.MINUTA||0)+(porEst.SEPARACION||0)+(porEst['PAGANDO SIN MINUTA']||0),nEv=filas.filter(function(f){return f.x;}).length;
+  var h='<div class="seg ltseg">'+LT_ETAPAS.map(function(e){return '<button data-et="'+e[0]+'"'+(et===e[0]?' class="on"':'')+'>'+e[1]+' <span class="c">'+cnt[e[0]]+'</span></button>';}).join('')+'</div>';
+  h+='<div class="kpis4">'
+    +kpiCard('Lotes',String(nEv),(filas.length>nEv?(filas.length-nEv)+' más en el plano, aún no en Evolta':'según el Stock de Evolta'))
+    +kpiCard('Disponibles',String(porEst.DISPONIBLE||0),nf(m2Disp).replace(/\.00$/,'')+' m²'+(valDisp?' · lista '+S(valDisp):''),{vcls:'pos'})
+    +kpiCard('Vendidos o separados',String(vend),(porEst.MINUTA||0)+' con minuta · '+(porEst.SEPARACION||0)+' en separación'+(porEst['PAGANDO SIN MINUTA']?' · '+porEst['PAGANDO SIN MINUTA']+' pagando sin minuta':''))
+    +kpiCard('Entró al banco',S(banco),'por estos lotes desde enero 2026 · ventas y cobranza')
+    +'</div>';
+  // filtros
+  h+='<div class="card"><div class="card-head"><div><h2 class="card-title">'+esc(LT_ETAPAS.filter(function(e){return e[0]===et;})[0][1])+'</h2><div class="card-sub">'+(pl?'Toca un lote en el plano o en la lista':'Aún no hay plano de esta etapa · toca un lote en la lista')+'</div></div>'
+    +'<label class="search">'+ico('magnifying-glass')+'<input id="ltQ" placeholder="Buscar lote o cliente…" value="'+esc(LT.q)+'"></label></div>'
+    +'<div class="chips">'+'<button class="chip'+(!LT.est?' on':'')+'" data-e="">Todos<span class="c">'+filas.length+'</span></button>'
+    +LT_ORDEN.filter(function(k){return porEst[k];}).map(function(k){return '<button class="chip'+(LT.est===k?' on':'')+'" data-e="'+k+'"><span class="dot round" style="background:'+LT_EST[k].c+'"></span>'+LT_EST[k].l+'<span class="c">'+porEst[k]+'</span></button>';}).join('')+'</div>';
+  var sel=LT.sel&&filas.filter(function(f){return f.key===LT.sel;})[0];
+  h+='<div class="ltgrid'+(pl?'':' sinplano')+'">';
+  if(pl)h+='<div class="ltmapbox"><div class="ltzoom"><button class="btn btn-secondary btn-sm" data-z="1">'+ico('plus')+'</button><button class="btn btn-secondary btn-sm" data-z="-1">'+ico('minus')+'</button><button class="btn btn-ghost btn-sm" data-z="0">Ver todo</button></div><div class="ltmap" id="ltMap">'+ltSvg(pl,filas,sel)+'</div></div>';
+  h+='<div class="ltficha" id="ltFicha">'+(sel?ltFichaHtml(sel):'<div class="ltvacio">'+ico('cursor-click')+'<span>Elige un lote para ver su ficha</span></div>')+'</div></div>';
+  var lista=filas.filter(ltPasa);
+  h+='<div class="tablewrap ltlist"><table class="table cards"><thead><tr><th>Lote</th><th>Estado</th><th class="num">m²</th><th class="num">Precio de lista</th><th>Cliente</th><th class="num">Entró al banco</th></tr></thead><tbody>'
+    +lista.map(function(f){return '<tr class="click'+(sel&&sel.key===f.key?' sel':'')+'" data-k="'+esc(f.key)+'"><td class="full"><b>'+esc(f.lote)+'</b></td><td data-l="Estado"><span class="pill '+LT_EST[f.est].p+'">'+LT_EST[f.est].l+'</span></td><td class="num" data-l="m²">'+(f.m2!=null?nf(f.m2):'—')+'</td><td class="num" data-l="Precio">'+ltPrecio(f)+'</td><td data-l="Cliente">'+esc(f.c?f.c.titular:'—')+'</td><td class="num" data-l="Banco">'+(f.banco?S(f.banco):'—')+'</td></tr>';}).join('')
+    +'</tbody></table></div>'+(lista.length?'':emptyHtml('magnifying-glass','Ningún lote con este filtro',''))+'</div>';
+  h+='<p class="nota">Estado, m² y precio vienen del Stock de Evolta. El cliente y lo pagado según Evolta, del Flujo de Caja. "Entró al banco" suma los ingresos de ventas y cobranza de Movimientos con ese lote (el banco está cargado desde enero 2026).</p>';
+  box.innerHTML=h;ltWire(filas);
+}
+function ltSvg(pl,filas,sel){
+  var by={};filas.forEach(function(f){by[ltNom(f.raw)]=f;});
+  var hayFiltro=!!(LT.est||LT.q.trim());
+  var s='<svg viewBox="-10 -10 '+(pl.w+20)+' '+(pl.h+20)+'" style="height:'+(LT.zoom*100)+'%" role="img" aria-label="Plano de lotes">';
+  pl.lots.forEach(function(p){var f=by[ltNom(p[0])];if(!f)return;var pts=[];for(var i=0;i<p[2].length;i+=2)pts.push(p[2][i]+','+p[2][i+1]);
+    var on=!hayFiltro||ltPasa(f);
+    s+='<polygon data-k="'+esc(f.key)+'" points="'+pts.join(' ')+'" fill="'+LT_EST[f.est].c+'" class="'+(sel&&sel.key===f.key?'sel':'')+(on?'':' off')+'"><title>'+esc(f.lote+' · '+LT_EST[f.est].l+(f.m2?' · '+nf(f.m2)+' m²':''))+'</title></polygon>';});
+  if(LT.zoom>=2)pl.lots.forEach(function(p){var xs=0,ys=0,n=p[2].length/2;for(var i=0;i<p[2].length;i+=2){xs+=p[2][i];ys+=p[2][i+1];}s+='<text class="ltnum" x="'+(xs/n).toFixed(0)+'" y="'+(ys/n+4).toFixed(0)+'">'+esc(p[0].replace(/^.*-/,'').replace(/_$/,''))+'</text>';});
+  pl.mz.forEach(function(m){s+='<text class="ltmz" x="'+m[1]+'" y="'+(m[2]+22)+'">'+esc(m[0])+'</text>';});
+  return s+'</svg>';
+}
+function ltFichaHtml(f){
+  var c=f.c,E=LT_EST[f.est];
+  var h='<div class="ltf-head"><div><div class="ltf-lote">'+esc(f.lote)+'</div><span class="pill '+E.p+'">'+E.l+'</span></div><button class="x" id="ltX" aria-label="Cerrar">'+ico('x')+'</button></div>'
+    +'<div class="kv ltkv"><div><span>m²</span><b>'+(f.m2!=null?nf(f.m2):'—')+'</b></div><div><span>Precio de lista</span><b>'+ltPrecio(f)+'</b></div>'
+    +(f.m2&&f.precio?'<div><span>Precio por m² (lista)</span><b>'+(f.moneda==='USD'?U(f.precio/f.m2):S(f.precio/f.m2))+'</b></div>':'')+'</div>';
+  if(c)h+='<div class="ltsec"><b>Cliente</b><div class="ltcli">'+esc(c.titular||'—')+'</div><div class="sub">'+[c.tipo_fin,c.vendedor?'asesor '+c.vendedor:'',c.fecha_venta?'venta '+dmy(c.fecha_venta):(c.fecha_sep?'separación '+dmy(c.fecha_sep):''),String(c.lotes||'').indexOf('+')!==-1?'contrato con '+esc(c.lotes):''].filter(Boolean).map(esc).join(' · ')+'</div>'
+    +'<div class="kv ltkv"><div><span>Precio pactado</span><b>'+(c.precio!=null?S(c.precio):'—')+'</b></div><div><span>Pagado según Evolta</span><b>'+(c.pagado!=null?S(c.pagado):'—')+'</b><em>'+(c.precio?((c.pagado||0)/c.precio*100).toFixed(0)+'% del precio':'')+'</em></div><div><span>Saldo según Evolta</span><b>'+(c.saldo!=null?S(c.saldo):'—')+'</b></div></div></div>';
+  h+='<div class="ltsec"><b>Entró al banco</b><div class="ltbig">'+S(f.banco)+'</div><div class="sub">desde enero 2026 · '+f.ms.length+' depósito'+(f.ms.length!==1?'s':'')+'</div>';
+  if(f.ms.length)h+='<div class="ltmovs">'+f.ms.slice().sort(function(a,b){return a.fecha<b.fecha?1:-1;}).map(function(m){return '<button class="ltmov" data-sig="'+encodeURIComponent(m.sig)+'"><span>'+dmy(m.fecha)+'<em>'+esc(clasLabel(m.clas))+(m.cuota?' · '+esc(m.cuota):'')+'</em></span>'+montoHtml(m)+'</button>';}).join('')+'</div>';
+  else h+='<div class="sub">'+(f.est==='DISPONIBLE'?'Lote disponible.':'Ningún ingreso de Movimientos tiene anotado este lote.')+'</div>';
+  return h+'</div>';
+}
+function ltWire(filas){
+  var box=$('lotesBody');
+  Array.prototype.forEach.call(box.querySelectorAll('.ltseg button'),function(b){b.onclick=function(){LT.etapa=b.dataset.et;LT.sel=null;LT.est='';LT.q='';LT.zoom=1;renderLotes();};});
+  Array.prototype.forEach.call(box.querySelectorAll('.chip[data-e]'),function(b){b.onclick=function(){LT.est=b.dataset.e;renderLotes();};});
+  var q=$('ltQ');q.oninput=function(){LT.q=q.value;var p=q.selectionStart;renderLotes();var n=$('ltQ');n.focus();try{n.setSelectionRange(p,p);}catch(e){}};
+  function elegir(k){LT.sel=LT.sel===k?null:k;renderLotes();var fi=$('ltFicha');if(fi&&LT.sel&&window.innerWidth<1000)fi.scrollIntoView({behavior:'smooth',block:'start'});}
+  Array.prototype.forEach.call(box.querySelectorAll('.ltlist tr[data-k]'),function(r){r.onclick=function(){elegir(r.dataset.k);var m=$('ltMap'),pg=m&&m.querySelector('polygon.sel');if(pg&&LT.zoom>1)pg.scrollIntoView({block:'center',inline:'center'});};});
+  var mp=$('ltMap');if(mp)mp.onclick=function(e){var pg=e.target.closest('polygon');if(pg)elegir(pg.dataset.k);};
+  Array.prototype.forEach.call(box.querySelectorAll('[data-z]'),function(b){b.onclick=function(){var z=+b.dataset.z;LT.zoom=z===0?1:Math.max(1,Math.min(6,LT.zoom*(z>0?1.6:1/1.6)));var m=$('ltMap'),cx=m.scrollLeft+m.clientWidth/2,cy=m.scrollTop+m.clientHeight/2,w0=m.scrollWidth,h0=m.scrollHeight;m.innerHTML=ltSvg(LT.planos[LT.etapa],filas,LT.sel&&filas.filter(function(f){return f.key===LT.sel;})[0]);m.scrollLeft=cx*m.scrollWidth/w0-m.clientWidth/2;m.scrollTop=cy*m.scrollHeight/h0-m.clientHeight/2;};});
+  var x=$('ltX');if(x)x.onclick=function(){LT.sel=null;renderLotes();};
+  Array.prototype.forEach.call(box.querySelectorAll('.ltmov'),function(b){b.onclick=function(){abrirIngresoConc(decodeURIComponent(b.dataset.sig));};});
 }
 
 // ============ Exportar ============
