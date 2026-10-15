@@ -551,6 +551,12 @@ details.concsteps>:last-child{margin-bottom:18px}
 .cmhist li em{font-style:normal;color:var(--gr-text-2);font-size:11.5px}
 .cmhist li b{white-space:nowrap;font-variant-numeric:tabular-nums}
 .cmhist-f{font-size:12px;color:var(--gr-text-2)}
+.cuadre2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.cuadre h3,.cuadre-h{font-size:14px;font-weight:700;margin:6px 0 8px}
+.cuadre-h{margin-top:18px}
+.destinos td .sub{font-size:11.5px}
+.destmas summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--gr-brand);padding:8px 0}
+@media (max-width:760px){.cuadre2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -2274,6 +2280,42 @@ function carteraHtml(){
     +'<div><span>Lotes disponibles</span><b>'+I.n+'</b><em>'+nf(I.m2).replace(/\.00$/,'')+' m² · lista '+S(I.valor)+(sep?' · '+sep+' en separación':'')+'</em></div>'
     +'</div></div>';
 }
+// ============ Cuadre del banco: saldo inicial + entradas − salidas = saldo final ============
+function ymPrev(y){var a=+y.slice(0,4),m=+y.slice(5,7)-1;if(m<1){m=12;a--;}return a+'-'+('0'+m).slice(-2);}
+function destinoMov(m){var d=String(m.desc||m.mov||'').toUpperCase().replace(/\s+/g,' ').trim();
+  if(/^OPERACION:|^ITF$|^COMIS(ION)? OP|N\/D (MEGA|AUTORIZADA)|MANTENIMIENTO|PORTES/.test(d)||m.area==='BANCO')return 'Comisiones e ITF del banco';return d||'(sin descripción)';}
+function cuadreBancoHtml(){
+  var anual=CV.ym.length===4,enP=periodoConc(),ms=allMovs().filter(function(m){return enP(m.fecha);});
+  var yFin=anual?(concMesesDisp().filter(function(y){return y.slice(0,4)===CV.ym;}).pop()||CV.ym+'-12'):CV.ym,yIni=anual?(+CV.ym-1)+'-12':ymPrev(CV.ym);
+  var si=DB.saldos[yIni]||{},sf=DB.saldos[yFin]||{};
+  function lado(mon){
+    var xs=ms.filter(function(m){return m.moneda===(mon==='S'?'PEN':'USD');}),E={},Sa={},te=0,ts=0;
+    xs.forEach(function(m){if(m.abono>0){var k=m.clas==='CAMBIO'?'Cambio de moneda':m.clas?clasLabel(m.clas).replace(/ \(.*\)/,''):'Sin clasificar';E[k]=(E[k]||0)+m.abono;te+=m.abono;}
+      if(m.cargo>0){var a=m.area==='CAMBIO'?'Cambio de moneda':m.esFijo?'Costos fijos (se reparten)':areaLabel(m.area);Sa[a]=(Sa[a]||0)+m.cargo;ts+=m.cargo;}});
+    var ini=mon==='S'?si.soles:si.dolares,fin=mon==='S'?sf.soles:sf.dolares,calc=ini!=null?ini+te-ts:null,dif=calc!=null&&fin!=null?fin-calc:null,F=mon==='S'?S:U;
+    function filas(o,signo){return Object.keys(o).sort(function(a,b){return o[b]-o[a];}).map(function(k){return '<tr class="ind"><td>'+esc(k)+'</td><td class="num">'+(signo<0?'('+F(o[k])+')':F(o[k]))+'</td></tr>';}).join('');}
+    return '<div class="cuadre"><h3>'+(mon==='S'?'Cuenta en soles':'Cuenta en dólares')+'</h3><table class="table er"><tbody>'
+      +'<tr class="sum"><td>Saldo inicial<div class="sub">cierre de '+esc(mesLargo(yIni))+'</div></td><td class="num">'+(ini!=null?F(ini):'<span class="neg">falta</span>')+'</td></tr>'
+      +'<tr><td><b>Entradas</b></td><td class="num"><b>'+F(te)+'</b></td></tr>'+filas(E,1)
+      +'<tr><td><b>Salidas</b></td><td class="num"><b>('+F(ts)+')</b></td></tr>'+filas(Sa,-1)
+      +'<tr class="sum"><td>Saldo final calculado</td><td class="num">'+(calc!=null?F(calc):'—')+'</td></tr>'
+      +'<tr><td>Saldo final del banco<div class="sub">cierre de '+esc(mesLargo(yFin))+'</div></td><td class="num">'+(fin!=null?F(fin):'<span class="neg">falta</span>')+'</td></tr>'
+      +'<tr class="tot"><td>Diferencia</td><td class="num">'+(dif==null?'—':Math.abs(dif)<0.01?'<span class="pos">'+ico('check')+' cuadra</span>':'<b class="neg">'+F(dif)+'</b>')+'</td></tr>'
+      +'</tbody></table></div>';
+  }
+  // A dónde fue el dinero: salidas agrupadas por destinatario (dólares al TC pagado del periodo)
+  var cm=cambiosMoneda(enP),tc=cm.tc||getTC(anual?yFin:CV.ym),D={};
+  ms.forEach(function(m){if(!(m.cargo>0))return;var k=destinoMov(m),d=D[k]=D[k]||{k:k,s:0,n:0,areas:{}};d.s+=m.moneda==='USD'?m.cargo*tc:m.cargo;d.n++;
+    var a=m.area==='CAMBIO'?'Cambio de moneda':m.esFijo?'Costo fijo':areaLabel(m.area);d.areas[a]=(d.areas[a]||0)+1;});
+  var ls=Object.keys(D).map(function(k){return D[k];}).sort(function(a,b){return b.s-a.s;}),tot=ls.reduce(function(a,d){return a+d.s;},0);
+  function fila(d){return '<tr><td><b>'+esc(d.k)+'</b><div class="sub">'+Object.keys(d.areas).map(esc).join(' · ')+'</div></td><td class="num">'+d.n+'</td><td class="num">'+S(d.s)+'</td><td class="num muted3">'+(tot?(d.s/tot*100).toFixed(1)+'%':'')+'</td></tr>';}
+  return '<div class="card"><div class="card-head"><div><h2 class="card-title">Cuadre del banco</h2><div class="card-sub">Saldo inicial + lo que entró − lo que salió = saldo final · según los estados de cuenta</div></div></div>'
+    +'<div class="cuadre2">'+lado('S')+lado('U')+'</div>'
+    +'<h3 class="cuadre-h">¿A dónde fue el dinero?</h3><div class="tablewrap"><table class="table cards destinos"><thead><tr><th>Destinatario · área</th><th class="num">Pagos</th><th class="num">Monto S/</th><th class="num">%</th></tr></thead><tbody>'
+    +ls.slice(0,12).map(fila).join('')+'</tbody></table></div>'
+    +(ls.length>12?'<details class="destmas"><summary>Ver los '+(ls.length-12)+' destinatarios restantes</summary><div class="tablewrap"><table class="table cards destinos"><tbody>'+ls.slice(12).map(fila).join('')+'</tbody></table></div></details>':'')
+    +'<p class="nota">Las salidas en dólares se muestran en soles al TC pagado'+(cm.tc?' ('+cm.tc.toFixed(3)+')':'')+'. Si la diferencia no cuadra, falta cargar algún movimiento o el saldo final del mes.</p></div>';
+}
 
 // ============ Conciliación: datos ============
 var CONC={ok:false,pagos:{},ventas:[],contratos:[],stock:{},rows:{},cargado:''};
@@ -2346,7 +2388,7 @@ function renderConc(){
     +'</div>';
   var ban=(nDob?'<div class="banner neg"><div class="bi">'+ico('copy')+'</div><div class="bt"><b>'+nDob+' ingreso'+(nDob>1?'s usan':' usa')+' un pago de Evolta que ya se usó en otro depósito</b><span>El mismo pago no puede justificar dos depósitos. Filtra por <a href="#" id="verDob">Pago usado dos veces</a> y corrige a qué cliente o cuota corresponde.</span></div></div>':'')+((nPend||evSinPend.length||nConf||nDob)?'<div class="banner warn"><div class="bi">'+ico('warning')+'</div><div class="bt"><b>'+mesLargo(CV.ym).replace('—',CV.ym)+' aún no cuadra</b><span>Revisa '+(nPend?nPend+' ingreso'+(nPend>1?'s':'')+' sin cliente':'')+(nPend&&evSinPend.length?' y ':'')+(evSinPend.length?evSinPend.length+' pago'+(evSinPend.length>1?'s':'')+' de Evolta que no aparecen en el banco':'')+(nConf?((nPend||evSinPend.length)?', y ':'')+'confirma '+nConf+' cruce'+(nConf>1?'s':'')+' donde depositó otra persona':'')+(nDob&&!nPend&&!evSinPend.length&&!nConf?'el pago de Evolta usado dos veces':'')+'. Toca cada fila para corregirla.</span></div></div>'
     :'<div class="banner pos"><div class="bi">'+ico('check-circle')+'</div><div class="bt"><b>'+(CV.ym.length===4?'Año '+CV.ym:mesLargo(CV.ym))+' cuadrado</b><span>Todo ingreso de clientes tiene cliente y lote, y todo pago de Evolta está en el banco o revisado.</span></div></div>');
-  box.innerHTML=pasos+strip+kp+ban+'<div class="grid2">'+estadoResultadosHtml(movsP,partes)+'<div class="colstack">'+erVentasHtml(movsP,partes)+distribucionHtml(movsP)+'</div></div><div class="grid-er">'+lotesMesHtml(partes)+carteraHtml()+'</div><div class="card" id="concDet"></div>';
+  box.innerHTML=pasos+strip+kp+ban+'<div class="grid2">'+estadoResultadosHtml(movsP,partes)+'<div class="colstack">'+erVentasHtml(movsP,partes)+distribucionHtml(movsP)+'</div></div><div class="grid-er">'+cuadreBancoHtml()+lotesMesHtml(partes)+carteraHtml()+'</div><div class="card" id="concDet"></div>';
   Array.prototype.forEach.call(box.querySelectorAll('.mchip'),function(b){b.onclick=function(){CV.ym=b.dataset.ym;renderConc();};});
   var dp=$('concPasos');dp.ontoggle=function(){CV.pasos=dp.open;};
   var go=box.querySelector('[data-go]');if(go)go.onclick=function(e){e.preventDefault();irA('cargar');};
