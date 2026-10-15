@@ -1858,6 +1858,7 @@ function historialCambioHtml(g,actual){
   var ms=movsGrupo(g);if(!ms.length)return '';var r=resumenCambio(ms),e=CAMBIO_ESTADO[r.estado];
   var paso=function(m){var u=m.moneda==='USD',amt=u?U(m.cargo||m.abono):S(m.cargo||m.abono),txt;
     if(tramoCambio(m))txt=m.cargo>0?(u?'Se vendieron dólares':'Salieron soles a la casa de cambio'):(u?'Entraron los dólares':'Entraron los soles');
+    else if(m.abono>0)txt='Entró el dinero para el cambio · '+esc(m.clas?clasLabel(m.clas):'sin clasificar');
     else txt='Se pagó · '+esc(areaLabel(m.area));
     return '<li class="'+(sigOf(m)===actual?'on':'')+'"><span class="d">'+dmy(m.fecha)+'</span><span class="t">'+txt+'<em>'+esc(m.desc||m.mov)+(m.obs?' · '+esc(m.obs):'')+'</em></span><b class="'+(m.cargo>0?'neg':'pos')+'">'+(m.cargo>0?'−':'+')+amt+'</b></li>';};
   return '<div class="cmhist"><div class="cmhist-h"><b>Historial del cambio</b><span class="pill '+e[0]+'">'+e[1]+'</span></div><ol>'+ms.map(paso).join('')+'</ol>'
@@ -1886,7 +1887,7 @@ function abrirEnlaceCambio(sig){
   var g=m.cambioGrupo||nuevoGrupoCambio(m),sel={};movsGrupo(m.cambioGrupo).forEach(function(x){sel[sigOf(x)]=1;});sel[sig]=1;
   if(!m.cambioGrupo){var p=pareceCambio(m)?parejaSugerida(m):null;if(p){sel[sigOf(p)]=1;var en=m.abono>0?m:p.abono>0?p:null;if(en&&en.moneda==='USD')pagosSugeridos(en).forEach(function(x){sel[sigOf(x)]=1;});}}
   var area=m.cambioArea||(/\bMKT\b|MARKETING/i.test(m.obs||'')?'MKT':'');
-  var cands=allMovs().filter(function(x){return sigOf(x)!==sig&&cDias(x.fecha,m.fecha)<=10&&(!x.cambioGrupo||x.cambioGrupo===m.cambioGrupo)&&(pareceCambio(x)||(x.cargo>0&&x.moneda==='USD'&&x.area!=='BANCO')||sel[sigOf(x)]);})
+  var cands=allMovs().filter(function(x){return sigOf(x)!==sig&&cDias(x.fecha,m.fecha)<=10&&(!x.cambioGrupo||x.cambioGrupo===m.cambioGrupo)&&(pareceCambio(x)||(x.cargo>0&&x.moneda==='USD'&&x.area!=='BANCO')||(x.abono>0&&x.clas==='FINANCIAMIENTO'&&cDias(x.fecha,m.fecha)<=3)||sel[sigOf(x)]);})
     .sort(function(a,b){return (sel[sigOf(b)]?1:0)-(sel[sigOf(a)]?1:0)||(a.fecha<b.fecha?-1:1);});
   var old=$('concModal');if(old)old.remove();
   var w=document.createElement('div');w.id='concModal';w.className='modal-bg';
