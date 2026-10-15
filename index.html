@@ -2088,6 +2088,7 @@ function repartoIngresos(){
   var ix=indiceContratos(),out=[];
   ingresosConc().forEach(function(m){var s=solesDe(m),r=CONC.rows[m.sig];
     if(m.clas==='FINANCIAMIENTO'){out.push({m:m,s:s,cat:'fin'});return;}
+    if(esMovCambio(m)){out.push({m:m,s:s,cat:'cambio'});return;}
     if(r&&r.tipo==='interno'){out.push({m:m,s:s,cat:'interno'});return;}
     if(r&&r.tipo==='desistido'){out.push({m:m,s:s,cat:'desist',cli:r.cliente,lote:r.lote});return;}
     if(r&&r.tipo==='evolta'&&r.pagos&&r.pagos.length){var ps=r.pagos.map(function(k){return CONC.pagos[k];}).filter(Boolean),tt=ps.reduce(function(a,p){return a+p.monto;},0);
@@ -2359,7 +2360,8 @@ function solesDe(m){return m.moneda==='USD'?m.abono*getTC(ym(m.fecha)):m.abono;}
 function enlacesPago(){var o={};Object.keys(CONC.rows).forEach(function(s){(CONC.rows[s].pagos||[]).forEach(function(k){(o[k]=o[k]||[]).push(s);});});return o;}
 function periodoConc(){var y=CV.ym;return y.length===4?function(f){return f.slice(0,4)===y;}:function(f){return f.slice(0,7)===y;};}
 function ingresosConc(){return allMovs().filter(function(m){return m.abono>0;});}
-function esClienteIng(m){return m.clas!=='FINANCIAMIENTO';}
+// Ingreso de un cliente: no es préstamo ni la entrada de un cambio de moneda
+function esClienteIng(m){return m.clas!=='FINANCIAMIENTO'&&!esMovCambio(m);}
 function porConfirmar(r){return !!(r&&r.tipo==='evolta'&&/confirmar/.test(r.metodo||''));}
 function concMesesDisp(){var o={};ingresosConc().forEach(function(m){o[ym(m.fecha)]=1;});return Object.keys(o).sort();}
 
@@ -2447,7 +2449,7 @@ function renderConcDet(){
     var base=ing.filter(function(m){return !q||concTexto(m,destinoConc(m,ix)).indexOf(q)!==-1;});
     function ch(k,l){var n=base.filter(function(m){var r=CONC.rows[m.sig];return k==='todos'||(k==='vc'?difClas(m):k==='dob'?dobleEnMov(m.sig,dob):k==='pend'?!r:k==='conf'?porConfirmar(r):k==='ok'?r&&r.tipo==='evolta'&&!porConfirmar(r):r&&r.tipo!=='evolta');}).length;return '<button class="chip'+(CV.est===k?' on':'')+'" data-e="'+k+'">'+l+'<span class="c'+((k==='pend'||k==='conf'||k==='dob'||k==='vc')&&n?' red':'')+'">'+n+'</span></button>';}
     body+='<div class="chips">'+ch('pend','Pendientes')+ch('conf','Por confirmar')+ch('ok','Conciliados')+ch('marc','Asignados o marcados')+ch('todos','Todos')+(base.some(function(m){return dobleEnMov(m.sig,dob);})||CV.est==='dob'?ch('dob','Pago usado dos veces'):'')+(base.some(difClas)||CV.est==='vc'?ch('vc','Venta/cobranza por revisar'):'')
-      +'<select id="ctipo" class="chipsel"><option value="vc">Ventas y cobranza</option><option value="VENTAS">Solo ventas</option><option value="COBRANZA">Solo cobranza</option><option value="FINANCIAMIENTO">Financiamiento</option><option value="todos">Todos los ingresos</option></select></div>';
+      +'<select id="ctipo" class="chipsel"><option value="vc">Ventas y cobranza</option><option value="VENTAS">Solo ventas</option><option value="COBRANZA">Solo cobranza</option><option value="FINANCIAMIENTO">Financiamiento</option><option value="CAMBIO">Cambio de moneda</option><option value="todos">Todos los ingresos</option></select></div>';
     var lista=base.filter(estOK);
     if(CV.est==='vc'&&lista.length)body+='<div class="alert warn" style="margin-bottom:10px;align-items:center">'+ico('info')+'<span>Según el banco: es <b>venta</b> lo que entra dentro de los 60 días del primer pago del lote; las cuotas de financiamiento o saldo y lo que llega después es <b>cobranza</b>.</span>'+(READONLY?'':'<button class="btn btn-brand btn-sm" id="cvcAplicar" style="margin-left:auto;flex-shrink:0">Aplicar las '+lista.length+' sugerencias</button>')+'</div>';
     if(!lista.length)body+=emptyHtml(CV.est==='pend'?'check-circle':'magnifying-glass',CV.est==='pend'?'No hay ingresos pendientes':'No hay ingresos con este filtro',CV.est==='pend'?'Todo el dinero de este periodo tiene cliente asignado.':'');
