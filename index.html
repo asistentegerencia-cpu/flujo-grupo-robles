@@ -868,6 +868,8 @@ async function cargarNube(){
   await cargarMetas();
   await cargarMetasPersonal();
   if(typeof cargarConc==='function')await cargarConc();
+  await cargarVentasJuntas();
+  if(!LT.stock&&!LT.cargando)ltCargar().then(function(){if(VISTA==='conc'||VISTA==='ventas'||VISTA==='consol')renderActual();});
   setSync('sincronizado ✓ ('+total+' movs)');
 }
 async function cargarMetas(){
@@ -2031,7 +2033,7 @@ async function registrarCambio(tabla,clave,accion,antes,despues){
 
 // ============ Ventas por lote, con lo anotado en Movimientos ============
 // Una venta = un lote (o, si aún no tiene lote, el cliente)
-function loteKey(m){var l=cNorm(String(m.lote||'').replace(/ñ/gi,'NY')).replace(/\s+/g,'');if(l)return 'L|'+(m.etapa?ltEtapa(m.etapa)+'|':'')+l;var c=cNorm(m.cliente).replace(/[^A-Z ]/g,'').replace(/\s+/g,' ').trim();return c?'C|'+c:'';}
+function loteKey(m){var l=ltNom(m.lote);if(l)return 'L|'+(m.etapa?ltEtapa(m.etapa)+'|':'')+l;var c=cNorm(m.cliente).replace(/[^A-Z ]/g,'').replace(/\s+/g,' ').trim();return c?'C|'+c:'';}
 // Partes de un ingreso por lote: un depósito repartido entre varios lotes da una parte por lote
 function partesMov(m){var s=solesDe(m);
   if(m.repLotes&&m.repLotes.length>1)return m.repLotes.map(function(r){var f=m.abono?(+r.monto||0)/m.abono:0;return {lote:r.lote||'',etapa:r.etapa||'',cliente:m.cliente,cuota:r.cuota||'',m2:+r.m2||'',s:s*f,fecha:m.fecha};});
@@ -2046,15 +2048,56 @@ function clasSugerida(m,pp){
   var c=cuotaParse(m.cuota).k;if(c==='FIN'||c==='SALDO')return 'COBRANZA';if(c==='SEP'||c==='DESIST')return 'VENTAS';
   return diasEntre(pp[k],m.fecha)<=60?'VENTAS':'COBRANZA';
 }
-// Ventas del periodo agrupadas por lote: nuevas (primer pago en el periodo) y de meses anteriores
+// ============ Una venta = un contrato ============
+// Los lotes del mismo contrato de Evolta son UNA venta (ej. I-118 + X-4); además se pueden juntar a mano (tabla ventas_juntas).
+var VJ={};          // clave base → grupo, juntadas a mano
+var CT_IX=null;
+function ctIdx(){if(!LT.contratos)return null;if(CT_IX&&CT_IX.src===LT.contratos)return CT_IX;var o={},byId={};
+  LT.contratos.forEach(function(c){byId[c.id]=c;String(c.lotes||'').split('+').forEach(function(l){var k=c.etapaN+'|'+ltNom(l);if(!o[k]||(c.fecha_venta||c.fecha_sep||'')>(o[k].fecha_venta||o[k].fecha_sep||''))o[k]=c;});});
+  CT_IX={src:LT.contratos,o:o,byId:byId};return CT_IX;}
+// Clave base: el contrato de Evolta si todos los lotes son del mismo contrato; si no, el lote (o el cliente)
+function ventaBase(p){var k=loteKey(p);if(!k||k.charAt(0)!=='L'||!p.etapa)return k;var ix=ctIdx();if(!ix)return k;
+  var et=ltEtapa(p.etapa),ids=[],ok=true;
+  String(p.lote).split('+').forEach(function(l){l=l.trim();if(!l)return;var c=ix.o[et+'|'+ltNom(l)];if(!c){ok=false;return;}if(ids.indexOf(c.id)===-1)ids.push(c.id);});
+  return ok&&ids.length===1?'V|'+ids[0]:k;}
+function ventaKey(p){var b=ventaBase(p);return b&&VJ[b]?VJ[b]:b;}
+function contratoDe(k){var ix=ctIdx();return ix&&k&&k.indexOf('V|')===0?ix.byId[k.slice(2)]:null;}
+// m² de una venta: suma de sus lotes (m² de Evolta; si no está, lo anotado en Movimientos)
+function m2DeGrupo(parts){var lots={},maxAll=0;
+  parts.forEach(function(p){maxAll=Math.max(maxAll,+p.m2||0);var ls=String(p.lote||'').split('+').map(function(l){return l.trim();}).filter(Boolean);
+    ls.forEach(function(l){var n=ltNom(l),st=stockDe(p.etapa,l);lots[n]=lots[n]||{st:st&&st.m2!=null?+st.m2:null,max:0};if(ls.length===1)lots[n].max=Math.max(lots[n].max,+p.m2||0);});});
+  var ns=Object.keys(lots);if(!ns.length)return maxAll;var s=0,falta=false;
+  ns.forEach(function(n){var v=lots[n].st!=null?lots[n].st:lots[n].max;if(!v)falta=true;s+=v||0;});
+  return falta?Math.max(s,maxAll):s;}
+// Lotes de una venta para mostrar (nombre como está en Evolta)
+function lotesTexto(parts){var o={};parts.forEach(function(p){String(p.lote||'').split('+').forEach(function(l){l=l.trim();if(!l)return;var n=ltNom(l);if(!o[n]){var st=stockDe(p.etapa,l);o[n]=st?st.lote:l;}});});
+  return Object.keys(o).map(function(n){return o[n];}).sort(function(a,b){return a.localeCompare(b,'es',{numeric:true});}).join(' + ');}
+async function cargarVentasJuntas(){var r=await sb.from('ventas_juntas').select('clave,grupo');VJ={};if(!r.error)(r.data||[]).forEach(function(x){VJ[x.clave]=x.grupo;});}
+function esJuntaManual(k){return Object.keys(VJ).some(function(c){return VJ[c]===k&&c!==k;});}
+async function juntarVentas(keys){
+  if(keys.length<2)return;var bases=[];
+  keys.forEach(function(k){var ms=Object.keys(VJ).filter(function(c){return VJ[c]===k;});(ms.length?ms:[k]).forEach(function(b){if(bases.indexOf(b)===-1)bases.push(b);});});
+  var grupo=keys.filter(function(k){return k.indexOf('V|')===0;})[0]||keys[0];
+  var rows=bases.map(function(b){return {clave:b,grupo:grupo,usuario:USUARIO?USUARIO.email:'',updated_at:new Date().toISOString()};});
+  setSync('guardando…');var r=await sb.from('ventas_juntas').upsert(rows,{onConflict:'clave'});
+  if(r.error){setSync('error: '+r.error.message);alert('No se pudo juntar: '+r.error.message);return;}
+  rows.forEach(function(x){VJ[x.clave]=x.grupo;});await registrarCambio('ventas_juntas',grupo,'juntar',null,{claves:bases});setSync('guardado ✓');renderActual();}
+async function separarVenta(grupo){
+  var cs=Object.keys(VJ).filter(function(c){return VJ[c]===grupo;});if(!cs.length)return;
+  setSync('guardando…');var r=await sb.from('ventas_juntas').delete().in('clave',cs);
+  if(r.error){setSync('error: '+r.error.message);alert('No se pudo separar: '+r.error.message);return;}
+  cs.forEach(function(c){delete VJ[c];});await registrarCambio('ventas_juntas',grupo,'separar',{claves:cs},null);setSync('guardado ✓');renderActual();}
+
+// Ventas del periodo agrupadas por venta (contrato o lote): nuevas (primer pago en el periodo) y de meses anteriores
 function lotesVentas(movs){
-  var enP=periodoConc(),pp=primerPagoLote(),G={},sinLote={s:0,ms:[]},m2={},fin=CV.ym.length===4?CV.ym+'-12-31':CV.ym+'-31',acum={};
-  allMovs().forEach(function(m){if(!esVentaCob(m))return;partesMov(m).forEach(function(p){var k=loteKey(p);if(!k)return;if(+p.m2>0)m2[k]=Math.max(m2[k]||0,+p.m2);if(m.fecha<=fin)acum[k]=(acum[k]||0)+p.s;});});
-  movs.forEach(function(m){if(!(m.abono>0)||m.clas!=='VENTAS'||!enP(m.fecha))return;partesMov(m).forEach(function(pt){var k=loteKey(pt);
+  var enP=periodoConc(),pp={},G={},sinLote={s:0,ms:[]},parts={},fin=CV.ym.length===4?CV.ym+'-12-31':CV.ym+'-31',acum={};
+  allMovs().forEach(function(m){if(!esVentaCob(m))return;partesMov(m).forEach(function(p){var k=ventaKey(p);if(!k)return;(parts[k]=parts[k]||[]).push(p);if(!pp[k]||m.fecha<pp[k])pp[k]=m.fecha;if(m.fecha<=fin)acum[k]=(acum[k]||0)+p.s;});});
+  movs.forEach(function(m){if(!(m.abono>0)||m.clas!=='VENTAS'||!enP(m.fecha))return;partesMov(m).forEach(function(pt){var k=ventaKey(pt);
     if(!k){sinLote.s+=pt.s;sinLote.ms.push(m);return;}
-    var g=G[k]=G[k]||{k:k,lote:'',cli:'',mes:0,dep:0,ms:[]};g.mes+=pt.s;g.dep++;g.ms.push(m);if(pt.lote&&!g.lote)g.lote=pt.lote;if(m.cliente&&!g.cli)g.cli=m.cliente;});});
+    var g=G[k]=G[k]||{k:k,lote:'',cli:'',mes:0,dep:0,ms:[]};g.mes+=pt.s;g.dep++;if(g.ms.indexOf(m)===-1)g.ms.push(m);if(m.cliente&&!g.cli)g.cli=m.cliente;});});
   var ant={n:0,s:0,ls:[]};
-  var ls=Object.keys(G).map(function(k){var g=G[k];g.m2=m2[k]||null;g.pm2=g.m2?g.mes/g.m2:null;g.fecha=pp[k]||'';g.acum=acum[k]||g.mes;return g;})
+  var ls=Object.keys(G).map(function(k){var g=G[k],c=contratoDe(k);g.lote=lotesTexto(parts[k]||[]);g.contrato=c;if(!g.cli&&c)g.cli=c.titular;g.manual=esJuntaManual(k);
+      g.m2=m2DeGrupo(parts[k]||[])||null;g.pm2=g.m2?g.mes/g.m2:null;g.fecha=pp[k]||'';g.acum=acum[k]||g.mes;return g;})
     .filter(function(g){if(g.fecha&&!enP(g.fecha)){ant.n++;ant.s+=g.mes;ant.ls.push(g);return false;}return true;}).sort(function(a,b){return b.mes-a.mes;});
   var T={mes:0,m2:0,m2con:0};ls.forEach(function(g){T.mes+=g.mes;if(g.m2){T.m2+=g.m2;T.m2con+=g.mes;}});
   return {ls:ls,sinLote:sinLote.s,sinLoteMs:sinLote.ms,T:T,ant:ant};
@@ -2079,15 +2122,19 @@ function lotesMesHtml(movs){
   var h='<p class="nota" style="margin-top:0">Lotes cuyo primer pago entró al banco en el '+per+'. Cliente, lote y m² salen de lo anotado en Movimientos; toca una fila para completarlos.</p>';
   h+='<div class="vmini"><div><span>Ventas nuevas</span><b>'+ls.length+'</b></div><div><span>m²</span><b>'+(T.m2?nf(T.m2).replace(/\.00$/,''):'—')+'</b></div><div><span>Precio por m² (lo que entró)</span><b>'+(T.m2?S(T.m2con/T.m2):'—')+'</b></div></div>';
   if(!ls.length)return plegable('lotes',tit,res,h+emptyHtml('tray','Ninguna venta nueva en este periodo','Los ingresos clasificados como ventas aparecen aquí cuando tienen cliente o lote.'));
-  h+='<div class="tablewrap lotesmes"><table class="table cards"><thead><tr><th>Lote · cliente</th><th class="num">m²</th><th class="num">Entró en el '+per+'</th><th class="num">S/ por m²</th><th class="num">Acumulado</th></tr></thead><tbody>'
+  if(!READONLY)h+='<div class="vjbar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 8px"><span class="muted" style="font-size:12.5px">'+ico('link')+' Si dos filas son la misma venta (un cliente que compró varios lotes), márcalas y júntalas. Los lotes del mismo contrato de Evolta ya se juntan solos.</span><button type="button" class="btn btn-secondary btn-sm" id="vjJuntar" disabled style="margin-left:auto">Juntar como una venta</button></div>';
+  h+='<div class="tablewrap lotesmes"><table class="table cards"><thead><tr>'+(READONLY?'':'<th style="width:32px"></th>')+'<th>Lote · cliente</th><th class="num">m²</th><th class="num">Entró en el '+per+'</th><th class="num">S/ por m²</th><th class="num">Acumulado</th></tr></thead><tbody>'
     +ls.map(function(g){
-      return '<tr class="click" data-sig="'+encodeURIComponent(g.ms[0].sig)+'"><td class="full"><b>'+esc(g.lote||'Sin lote')+'</b>'+(!g.lote?' <span class="pill warn">Falta lote</span>':'')+(!g.m2?' <span class="pill warn">Falta m²</span>':'')
-        +'<div class="sub">'+esc(g.cli||'Sin cliente')+(g.fecha?' · primer pago '+dmy(g.fecha):'')+'</div></td>'
+      return '<tr class="click" data-sig="'+encodeURIComponent(g.ms[0].sig)+'">'+(READONLY?'':'<td class="ck" data-l=""><input type="checkbox" class="chk vjchk" data-k="'+esc(g.k)+'" aria-label="Elegir para juntar"></td>')
+        +'<td class="full"><b>'+esc(g.lote||'Sin lote')+'</b>'+(!g.lote?' <span class="pill warn">Falta lote</span>':'')+(!g.m2?' <span class="pill warn">Falta m²</span>':'')
+        +(g.contrato&&g.lote.indexOf('+')!==-1?' <span class="pill ok" title="Contrato de Evolta: '+esc(g.contrato.titular||'')+'">Un contrato</span>':'')
+        +(g.manual?' <span class="pill brand">Juntada a mano</span>'+(READONLY?'':' <button type="button" class="btn btn-ghost btn-sm vjSep" data-g="'+esc(g.k)+'">Separar</button>'):'')
+        +'<div class="sub">'+esc(g.cli||'Sin cliente')+(g.ms.length>1?' · '+g.ms.length+' pagos':'')+(g.fecha?' · primer pago '+dmy(g.fecha):'')+'</div></td>'
         +'<td class="num" data-l="m²">'+(g.m2?nf(g.m2):'—')+'</td>'
         +'<td class="num" data-l="Entró en el '+per+'"><b>'+S(g.mes)+'</b><div class="sub">'+g.dep+' depósito'+(g.dep!==1?'s':'')+'</div></td>'
         +'<td class="num" data-l="S/ por m²"><b>'+(g.pm2!=null?S(g.pm2):'—')+'</b></td>'
         +'<td class="num" data-l="Acumulado">'+S(g.acum)+'</td></tr>';}).join('')
-    +'<tr class="total"><td>Total</td><td class="num" data-l="m²">'+(T.m2?nf(T.m2):'')+'</td><td class="num" data-l="Entró">'+S(T.mes)+'</td><td class="num" data-l="S/ por m²">'+(T.m2?S(T.m2con/T.m2):'')+'</td><td></td></tr></tbody></table></div>'
+    +'<tr class="total">'+(READONLY?'':'<td></td>')+'<td>Total</td><td class="num" data-l="m²">'+(T.m2?nf(T.m2):'')+'</td><td class="num" data-l="Entró">'+S(T.mes)+'</td><td class="num" data-l="S/ por m²">'+(T.m2?S(T.m2con/T.m2):'')+'</td><td></td></tr></tbody></table></div>'
     +(LV.ant.n?'<p class="nota">No se listan <b>'+LV.ant.n+'</b> venta'+(LV.ant.n!==1?'s':'')+' de meses anteriores que siguen pagando su inicial ('+S(LV.ant.s)+'): '+LV.ant.ls.map(function(g){return esc(g.lote||g.cli||'—')+' desde '+dmy(g.fecha);}).join(', ')+'.</p>':'')
     +(LV.sinLote>1?'<p class="nota"><b>'+S(LV.sinLote)+'</b> de ventas aún no tienen cliente ni lote: complétalos en Pendientes.</p>':'')
     +'<p class="nota">El precio por m² es lo que entró en el periodo entre los m² del lote. El acumulado suma todo lo que entró al banco para ese lote hasta el cierre del periodo.</p>';
@@ -2100,12 +2147,27 @@ var PEND_TIPOS=[
   ['cuo','Ventas o cobranza sin cuota'],
   ['m2','Ventas nuevas sin lote o sin m²'],
   ['vc','Venta o cobranza al revés'],
+  ['evo','Lote que no calza con Evolta'],
   ['sincl','Ingresos sin clasificar'],
   ['area','Egresos sin área'],
   ['cam','Cambios de moneda sin armar']];
+// ¿El lote anotado calza con Evolta? Devuelve el problema en texto o ''
+function nomToks(s){return cNorm(s).split(/[^A-Z]+/).filter(function(t){return t.length>=4;});}
+function mismoTitular(a,b){var ta=nomToks(a),tb=nomToks(b),n=ta.filter(function(t){return tb.indexOf(t)!==-1;}).length;return n>0&&n>=Math.min(2,ta.length,tb.length);}
+function evoProblema(m){
+  var ix=ctIdx();if(!ix||!esVentaCob(m)||!m.lote||!m.etapa)return '';var txt='';
+  partesMov(m).forEach(function(p){if(txt||!p.etapa)return;String(p.lote||'').split('+').forEach(function(l){l=l.trim();if(txt||!l)return;
+    var c=ix.o[ltEtapa(p.etapa)+'|'+ltNom(l)];
+    if(c){if(m.cliente&&c.titular&&!mismoTitular(m.cliente,c.titular))txt='En Evolta '+l+' es de '+c.titular;return;}
+    if(!m.cliente)return;var cc=ix.cli||(ix.cli={}),otros=cc[m.cliente]||(cc[m.cliente]=LT.contratos.filter(function(x){return x.titular&&mismoTitular(m.cliente,x.titular);}));
+    if(!otros.length)return;
+    var n=ltNom(l);if(otros.some(function(x){return String(x.lotes||'').split('+').some(function(y){return ltNom(y)===n;});}))return; // está en otro contrato suyo (otra etapa): OK
+    txt=l+' no está en ningún contrato de '+otros[0].titular+' · en Evolta tiene: '+otros.map(function(x){return x.lotes+' ('+etapaCorta(x.etapa)+')';}).join(', ');});});
+  return txt;}
 function pendientesConc(movs){
-  var pp=primerPagoLote(),LV=lotesVentas(movs),o={cli:[],cuo:[],m2:[],vc:[],sincl:[],area:[],cam:[]},sug={};
+  var pp=primerPagoLote(),LV=lotesVentas(movs),o={cli:[],cuo:[],m2:[],vc:[],evo:[],sincl:[],area:[],cam:[]},sug={},evo={};
   movs.forEach(function(m){
+    var ev=evoProblema(m);if(ev){o.evo.push(m);evo[m.sig]=ev;}
     if(esVentaCob(m)&&!loteKey(m)&&cuotaParse(m.cuota).k!=='DESIST')o.cli.push(m);
     if(esVentaCob(m)&&m.lote&&!cuotaParse(m.cuota).k)o.cuo.push(m);
     if(m.abono>0&&!m.clas&&!esMovCambio(m))o.sincl.push(m);
@@ -2113,7 +2175,7 @@ function pendientesConc(movs){
     if(m.cargo>0&&(m.area==='REVISAR'||!m.area))o.area.push(m);
     if(esMovCambio(m)&&!m.cambioGrupo)o.cam.push(m);});
   LV.ls.forEach(function(g){if(!g.lote||!g.m2)o.m2.push(g.ms[0]);});
-  return {o:o,sug:sug};
+  return {o:o,sug:sug,evo:evo};
 }
 function pendientesHtml(movs){
   var P=pendientesConc(movs),o=P.o,n=PEND_TIPOS.reduce(function(a,t){return a+o[t[0]].length;},0);
@@ -2125,9 +2187,10 @@ function pendientesHtml(movs){
   var ls=o[k].slice().sort(function(a,b){return a.fecha<b.fecha?-1:1;});
   if(k==='vc')h+='<div class="alert warn" style="margin-bottom:10px;align-items:center">'+ico('info')+'<span>Es <b>venta</b> lo que entra dentro de los 60 días del primer pago del lote; las cuotas de financiamiento o saldo y lo que llega después es <b>cobranza</b>.</span>'+(READONLY?'':'<button class="btn btn-brand btn-sm" id="cvcAplicar" style="margin-left:auto;flex-shrink:0">Aplicar las '+ls.length+'</button>')+'</div>';
   if(k==='cam')h+='<p class="nota" style="margin-top:0">Ármalos en Movimientos con el botón "Armar el cambio".</p>';
+  if(k==='evo')h+='<p class="nota" style="margin-top:0">El lote anotado es de otro cliente en Evolta, o no tiene contrato pero el cliente sí tiene otros lotes. Suele ser un lote mal escrito: toca la fila y corrige el lote con el buscador.</p>';
   h+='<div class="tablewrap"><table class="table cards"><thead><tr><th>Fecha</th><th>Movimiento</th><th class="num">Monto</th><th>'+(k==='area'||k==='cam'?'Área':'Clasificación · cliente · lote')+'</th></tr></thead><tbody>'
     +ls.map(function(m){return '<tr class="click" data-sig="'+encodeURIComponent(m.sig)+'"><td class="nowrap muted" data-l="Fecha">'+dmy(m.fecha)+'</td><td class="full"><b>'+esc(m.desc||m.mov)+'</b>'+(m.obs?'<div class="sub">'+esc(m.obs)+'</div>':'')+'</td><td class="num" data-l="Monto">'+montoHtml(m)+'</td>'
-      +'<td data-l="'+(k==='area'||k==='cam'?'Área':'Detalle')+'">'+(k==='area'||k==='cam'?esc(areaLabel(m.area)):'<span class="sub">'+esc(m.clas?clasLabel(m.clas).replace(/ \(.*\)/,''):'Sin clasificar')+(P.sug[m.sig]?' → <b class="neg">'+esc(clasLabel(P.sug[m.sig]))+'</b>':'')+(m.cliente?' · '+esc(m.cliente):'')+(m.lote?' · '+esc(m.lote):'')+(+m.m2?' · '+nf(+m.m2)+' m²':'')+(m.cuota?' · '+esc(m.cuota):'')+'</span>')+'</td></tr>';}).join('')
+      +'<td data-l="'+(k==='area'||k==='cam'?'Área':'Detalle')+'">'+(k==='area'||k==='cam'?esc(areaLabel(m.area)):'<span class="sub">'+esc(m.clas?clasLabel(m.clas).replace(/ \(.*\)/,''):'Sin clasificar')+(P.sug[m.sig]?' → <b class="neg">'+esc(clasLabel(P.sug[m.sig]))+'</b>':'')+(m.cliente?' · '+esc(m.cliente):'')+(m.lote?' · '+esc(m.lote):'')+(+m.m2?' · '+nf(+m.m2)+' m²':'')+(m.cuota?' · '+esc(m.cuota):'')+'</span>'+(k==='evo'&&P.evo[m.sig]?'<div class="sub neg">'+esc(P.evo[m.sig])+'</div>':''))+'</td></tr>';}).join('')
     +'</tbody></table></div>';
   return h;
 }
@@ -2174,7 +2237,13 @@ function renderConc(){
   box.innerHTML=strip+ban+'<div class="grid2">'+estadoResultadosHtml(movsP)+'<div class="colstack">'+erVentasHtml(movsP)+distribucionHtml(movsP)+'</div></div>'+cuadreBancoHtml()+destinosHtml()+lotesMesHtml(movsP)+'<div class="card" id="concDet">'+pendientesHtml(movsP)+'</div>';
   Array.prototype.forEach.call(box.querySelectorAll('.mchip'),function(b){b.onclick=function(){CV.ym=b.dataset.ym;renderConc();};});
   Array.prototype.forEach.call(box.querySelectorAll('details.plegable'),function(d){d.ontoggle=function(){CV.sec[d.dataset.sec]=d.open;};});
-  Array.prototype.forEach.call(box.querySelectorAll('.lotesmes tr[data-sig]'),function(r){r.onclick=function(){abrirIngresoConc(decodeURIComponent(r.dataset.sig));};});
+  Array.prototype.forEach.call(box.querySelectorAll('.lotesmes tr[data-sig]'),function(r){r.onclick=function(e){if(e.target.closest('.ck,.vjSep'))return;abrirIngresoConc(decodeURIComponent(r.dataset.sig));};});
+  var vjb=$('vjJuntar'),vjc=box.querySelectorAll('.vjchk');
+  function vjSel(){return Array.prototype.filter.call(vjc,function(c){return c.checked;}).map(function(c){return c.dataset.k;});}
+  Array.prototype.forEach.call(vjc,function(c){c.onchange=function(){var n=vjSel().length;if(vjb){vjb.disabled=n<2;vjb.textContent=n>=2?'Juntar '+n+' como una venta':'Juntar como una venta';}};});
+  if(vjb)vjb.onclick=function(){var ks=vjSel();if(ks.length<2)return;if(!LT.contratos&&!LT.error){toast('','Cargando contratos de Evolta… inténtalo en unos segundos');return;}
+    if(!confirm('¿Juntar '+ks.length+' filas como UNA sola venta?\nSolo cambia cómo se cuentan las ventas nuevas y los m²; no cambia ningún monto.'))return;vjb.disabled=true;juntarVentas(ks);};
+  Array.prototype.forEach.call(box.querySelectorAll('.vjSep'),function(b){b.onclick=function(e){e.stopPropagation();if(confirm('¿Separar esta venta en sus lotes otra vez?'))separarVenta(b.dataset.g);};});
   wirePend(movsP);
 }
 function wirePend(movsP){
@@ -2318,7 +2387,8 @@ var LT_EST={
 var LT_ORDEN=['DISPONIBLE','SEPARACION','PAGANDO SIN MINUTA','MINUTA','NOEVOLTA'];
 async function ltTodo(tabla){var out=[],d=0;for(;;){var q=await sb.from(tabla).select('*').range(d,d+999);if(q.error)throw q.error;out=out.concat(q.data||[]);if(!q.data||q.data.length<1000)break;d+=1000;}return out;}
 function ltEtapa(s){return cNorm(s).replace(/\s+/g,' ').trim();}
-function ltNom(s){return cNorm(String(s==null?'':s).replace(/ñ/gi,'NY')).replace(/\s+/g,'');}
+// Nombre de lote normalizado: sin espacios ni guiones y sin ceros a la izquierda (X-04 = X-4 = X4 · I-144 = I144)
+function ltNom(s){return cNorm(String(s==null?'':s).replace(/ñ/gi,'NY')).replace(/[\s-]+/g,'').replace(/([A-Z'])0+(?=\d)/g,'$1');}
 function ltEstado(x){var e=cNorm(x&&x.estado).trim();return x?(LT_EST[e]?e:'MINUTA'):'NOEVOLTA';}
 async function ltCargar(){
   if(LT.cargando)return;LT.cargando=true;LT.error='';
@@ -2515,10 +2585,10 @@ function sepPill(m){var e=sepEstado(m);if(!e)return '';
   return e.k==='conv'?'<span class="pill ok" title="Siguiente pago del lote: '+dmy(e.fecha)+'">Se convirtió</span>':e.k==='desist'?'<span class="pill ex">Desistida</span>':e.k==='pend'?'<span class="pill warn">Pendiente · '+e.dias+' d</span>':'<span class="pill warn">Sin lote</span>';}
 // M² vendidos: cada lote una sola vez, en el periodo donde entró su primer pago (como en Conciliación)
 function m2PorLote(movs){
-  var dentro={},pri={},m2={},proy={},ase={};movs.forEach(function(m){dentro[m.sig]=1;});
-  allMovs().forEach(function(m){if(!esVentaCob(m))return;partesMov(m).forEach(function(p){var k=loteKey(p);if(!k)return;
-    if(+p.m2>0)m2[k]=Math.max(m2[k]||0,+p.m2);if(!pri[k]||m.fecha<pri[k].fecha)pri[k]=m;if(m.proyecto&&!proy[k])proy[k]=m.proyecto;if(m.asesor&&!ase[k])ase[k]=m.asesor;});});
-  return Object.keys(pri).filter(function(k){return dentro[pri[k].sig]&&m2[k];}).map(function(k){var m=pri[k];return {k:k,m2:m2[k],proyecto:m.proyecto||proy[k]||'',asesor:m.asesor||ase[k]||''};});
+  var dentro={},pri={},parts={},proy={},ase={};movs.forEach(function(m){dentro[m.sig]=1;});
+  allMovs().forEach(function(m){if(!esVentaCob(m))return;partesMov(m).forEach(function(p){var k=ventaKey(p);if(!k)return;
+    (parts[k]=parts[k]||[]).push(p);if(!pri[k]||m.fecha<pri[k].fecha)pri[k]=m;if(m.proyecto&&!proy[k])proy[k]=m.proyecto;if(m.asesor&&!ase[k])ase[k]=m.asesor;});});
+  return Object.keys(pri).filter(function(k){return dentro[pri[k].sig];}).map(function(k){var m=pri[k];return {k:k,m2:m2DeGrupo(parts[k]),proyecto:m.proyecto||proy[k]||'',asesor:m.asesor||ase[k]||''};}).filter(function(x){return x.m2>0;});
 }
 // Lote en las tablas: se muestra con su etapa; se edita en Movimientos (buscador de lotes de Evolta)
 function loteCelda(m,se){var t=m.lote?m.lote+(m.etapa&&!(m.repLotes&&m.repLotes.length>1)?' · '+etapaCorta(m.etapa):''):'';
