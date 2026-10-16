@@ -2177,7 +2177,7 @@ async function separarVenta(grupo){
   cs.forEach(function(c){delete VJ[c];});await registrarCambio('ventas_juntas',grupo,'separar',{claves:cs},null);setSync('guardado ✓');renderActual();}
 
 // ============ Ventas reales: fecha de venta, separaciones, desistidas y confirmación ============
-// Fecha de venta: la del contrato de Evolta; si no está, el primer pago de Ventas que no es separación (la inicial).
+// Fecha de venta: según el BANCO, el primer pago de Ventas que no es separación (la inicial). Evolta solo se usa para agrupar lotes del mismo contrato y los m².
 // Si solo hay separaciones, aún no es venta. Si separó un mes y pagó la inicial al siguiente, la VENTA cuenta en el mes de la inicial,
 // pero el DINERO se respeta en su mes: en cada periodo solo suma lo que entró en ese periodo (el acumulado es solo referencia).
 var VC={};          // ventas confirmadas a mano: clave → {ym}
@@ -2203,12 +2203,17 @@ function infoVentas(){
     var c=cuotaParse(p.cuota).k;
     if(c==='DESIST')g.desist=true;
     else if(c==='SEP'){if(!g.sep||m.fecha<g.sep)g.sep=m.fecha;}
-    else if(m.clas==='COBRANZA'||c==='FIN'||c==='SALDO')g.cob=true;
-    else if(!g.fv||m.fecha<g.fv)g.fv=m.fecha;});});
+    else{ // primer pago que no es separación: ¿empieza la venta (inicial 1, saldo 1, pago de venta) o ya venía pagando (financiamiento, inicial 2+)?
+      var n=+((cNorm(p.cuota).match(/(\d+)/)||[])[1]||0);
+      var etapa=/SALDO/.test(cNorm(p.cuota))?(n>1?'despues':'inicio'):c==='FIN'?'despues':(c==='INIP'||c==='INIT'||c==='SALDO')?(n>1?'despues':'inicio'):(m.clas==='COBRANZA'?'despues':'inicio');
+      if(!g.fv||m.fecha<g.fv||(m.fecha===g.fv&&etapa==='inicio')){g.fv=m.fecha;g.fvEtapa=etapa;}}});});
   Object.keys(G).forEach(function(k){var g=G[k],c=contratoDe(k);g.contrato=c;
     // Sin contrato: si ya pagaba cuotas (cobranza) antes de su primera "inicial", la venta es anterior (desde su primer pago)
-    g.fechaVenta=c&&c.fecha_venta?String(c.fecha_venta).slice(0,10):(!c&&g.cob&&(!g.fv||g.fv>g.primer)?g.primer:g.fv)||'';
-    g.estado=g.desist?'desist':g.fechaVenta?'venta':'sep';
+    // Fecha de venta según el BANCO (no Evolta): primer pago de Ventas que no es separación; si ya pagaba cuotas antes, la venta es anterior
+    // Venta ANTERIOR (antes de los datos cargados): su primer pago es una cuota/financiamiento, o su primera inicial es la N° 2 o más
+    g.anterior=!!(g.fv&&g.fvEtapa==='despues'&&!(g.sep&&g.sep<=g.fv));
+    g.fechaVenta=g.anterior?'':(g.fv||'');
+    g.estado=g.desist?'desist':g.anterior?'anterior':g.fechaVenta?'venta':'sep';
     g.lote=lotesTexto(g.parts);if(!g.cli&&c)g.cli=c.titular;g.manual=esJuntaManual(k);g.m2=m2DeGrupo(g.parts)||null;g.conf=g.estado==='venta'&&ventaConfirmada(g);});
   return G;}
 // Ventas del periodo: del periodo (fecha de venta en el periodo), separaciones, desistidas y pagos de ventas de meses anteriores
@@ -2235,7 +2240,6 @@ function lotesVentas(movs){
 // Indicadores de ventas del periodo: solo ventas confirmadas (lo real); el dinero siempre es el que entró en el periodo
 function erVentasHtml(movs){
   var enP=periodoConc(),LV=lotesVentas(movs),A=areasConTC(movs,cambiosMoneda(enP)),gV=A['VENTAS'].eq,gM=A['MKT'].eq,n=LV.ls.length,C=LV.Tc,nc=C.n,tv=LV.T.mes+LV.Ts.s+LV.Td.s+LV.sinLote+LV.ant.s,per=CV.ym.length===4?'año':'mes';
-  var pc=LV.ls.filter(function(g){return g.conf&&g.contrato&&g.contrato.precio&&g.m2;}),prec=pc.reduce(function(a,g){return a+(+g.contrato.precio||0);},0),precM2=pc.reduce(function(a,g){return a+g.m2;},0);
   var sepAnt=LV.ls.filter(function(g){return g.conf&&g.sepAntes;}).length;
   function m2t(x){return nf(x).replace(/\.00$/,'')+' m²';}
   var falta=n-nc;
@@ -2243,8 +2247,8 @@ function erVentasHtml(movs){
     +(falta>0&&!READONLY?'<div class="alert warn" style="margin-bottom:10px">'+ico('seal-question')+'<span>Hay <b>'+falta+'</b> venta'+(falta!==1?'s':'')+' del '+per+' sin confirmar. Confírmalas en <b>Ventas del '+per+'</b> (abajo) para que cuenten aquí.</span></div>':'')
     +'<div class="kv">'
     +'<div><span>Ventas reales</span><b>'+nc+(n!==nc?' <small class="muted" style="font-weight:500">de '+n+'</small>':'')+'</b><em>'+(nc?S(C.mes)+' entró en el '+per+' por ellas'+(C.m2?' · '+m2t(C.m2):'')+(sepAnt?' · '+sepAnt+' separó en un mes anterior (ese dinero quedó en su mes)':''):'confirma las ventas del periodo')+'</em></div>'
-    +'<div><span>Precio por m²</span><b>'+(precM2?S(prec/precM2):'—')+'</b><em>'+(precM2?'precio de venta en Evolta · '+pc.length+' venta'+(pc.length!==1?'s':''):'sale del contrato en Evolta de las ventas confirmadas')+'</em></div>'
-    +'<div><span>Promedio por venta</span><b>'+(nc?S(C.mes/nc):'—')+'</b><em>lo que entró en el '+per+' por cada venta confirmada'+(prec&&pc.length?' · precio promedio '+S(prec/pc.length):'')+'</em></div>'
+    +'<div><span>S/ por m²</span><b>'+(C.m2?S(C.m2con/C.m2):'—')+'</b><em>'+(C.m2?'lo que entró al banco en el '+per+' entre los m² confirmados':'anota los m² de cada venta en Movimientos')+'</em></div>'
+    +'<div><span>Promedio por venta</span><b>'+(nc?S(C.mes/nc):'—')+'</b><em>lo que entró al banco en el '+per+' por cada venta confirmada</em></div>'
     +'<div><span>Costo de vender (Ventas + Mkt)</span><b>'+(nc?S((gV+gM)/nc):'—')+'</b><em>por venta confirmada · '+S(gV+gM)+' en el '+per+'</em></div>'
     +'<div><span>Dinero de ventas en el banco</span><b>'+S(tv)+'</b><em>todo lo que entró como ventas · '+S(LV.T.mes)+' de ventas del '+per+(LV.ant.n?' · '+S(LV.ant.s)+' de ventas anteriores':'')+(LV.Ts.n?' · '+S(LV.Ts.s)+' de '+LV.Ts.n+' separacion'+(LV.Ts.n!==1?'es':'')+' que aún no son venta':'')+(LV.Td.n?' · '+S(LV.Td.s)+' desistid'+(LV.Td.n!==1?'as':'a'):'')+(LV.sinLote>1?' · '+S(LV.sinLote)+' sin lote ni cliente':'')+'</em></div>'
     +'</div></div>';
@@ -2266,23 +2270,23 @@ function lotesMesHtml(movs){
     return '<tr class="click" data-sig="'+encodeURIComponent(mv.sig)+'">'+(READONLY?'':'<td class="ck" data-l=""><input type="checkbox" class="chk vjchk" data-k="'+esc(g.k)+'" aria-label="Elegir para juntar"></td>')
       +'<td class="full"><b>'+esc(g.lote||'Sin lote')+'</b>'+tags(g)
       +'<div class="sub">'+esc(g.cli||'Sin cliente')
-        +(modo==='venta'?' · venta '+dmy(g.fechaVenta)+(g.contrato&&g.contrato.fecha_venta?' (Evolta)':'')+(g.sepAntes?' · <b>separó el '+dmy(g.sepAntes)+'</b>':''):'')
-        +(modo==='ant'?' · venta del '+dmy(g.fechaVenta):'')
+        +(modo==='venta'?' · venta '+dmy(g.fechaVenta)+(g.sepAntes?' · <b>separó el '+dmy(g.sepAntes)+'</b>':''):'')
+        +(modo==='ant'?(g.anterior?' · venta anterior (ya pagaba antes de '+dmy(g.primer)+')':' · venta del '+dmy(g.fechaVenta)):'')
         +(modo==='sep'?' · separó el '+dmy(g.sep||g.primer)+(g.estado==='venta'?' · se volvió venta el '+dmy(g.fechaVenta):est&&est.k==='pend'?' · '+est.dias+' días sin otro pago':''):'')+'</div></td>'
       +'<td class="num" data-l="m²">'+(g.m2?nf(g.m2):'—')+'</td>'
       +'<td class="num" data-l="Entró en el '+per+'"><b>'+S(g.mes)+'</b>'+(g.dep?'<div class="sub">'+g.dep+' depósito'+(g.dep!==1?'s':'')+'</div>':'')+'</td>'
-      +'<td class="num muted" data-l="Acumulado (referencia)">'+S(g.acum)+(modo==='venta'&&g.contrato&&g.contrato.precio?'<div class="sub">precio '+S(+g.contrato.precio)+'</div>':'')+'</td>'
+      +'<td class="num muted" data-l="Acumulado (referencia)">'+S(g.acum)+'</td>'
       +ult+'</tr>';}
   function tabla(lista,modo,totales){var th=modo==='venta'?'¿Venta real?':modo==='sep'?'Estado':'';
     return '<div class="tablewrap lotesmes"><table class="table cards"><thead><tr>'+(READONLY?'':'<th style="width:32px"></th>')+'<th>Lote · cliente</th><th class="num">m²</th><th class="num">Entró en el '+per+'</th><th class="num">Acumulado <span style="text-transform:none;font-weight:500">(referencia)</span></th><th style="text-align:center">'+th+'</th></tr></thead><tbody>'
       +lista.map(function(g){return fila(g,modo);}).join('')+(totales||'')+'</tbody></table></div>';}
   function filaTot(txt,m2,mes){return '<tr class="total">'+(READONLY?'':'<td></td>')+'<td>'+txt+'</td><td class="num" data-l="m²">'+(m2?nf(m2):'')+'</td><td class="num" data-l="Entró">'+S(mes)+'</td><td></td><td></td></tr>';}
-  var h='<p class="nota" style="margin-top:0">Una venta cuenta en el '+per+' de su <b>fecha de venta</b>: la del contrato en Evolta o, si no está, la de su primer pago que no es separación (la inicial). El <b>dinero siempre queda en el '+per+' en que entró</b>: si separó antes, esa separación se quedó en su mes; el acumulado es solo referencia. <b>Solo las ventas confirmadas</b> cuentan en el total real y en los indicadores. Toca una fila para completar cliente, lote o cuota.</p>';
+  var h='<p class="nota" style="margin-top:0">Una venta cuenta en el '+per+' de su <b>fecha de venta según el banco</b>: el día que entró su primer pago que no es separación (la inicial). El <b>dinero siempre queda en el '+per+' en que entró</b>: si separó antes, esa separación se quedó en su mes; el acumulado es solo referencia. <b>Solo las ventas confirmadas</b> cuentan en el total real y en los indicadores. Toca una fila para completar cliente, lote o cuota.</p>';
   h+='<div class="vmini"><div><span>Ventas del '+per+'</span><b>'+ls.length+'</b></div><div><span>Confirmadas</span><b'+(C.n<ls.length?' class="neg"':'')+'>'+C.n+'</b></div><div><span>Total real (entró en el '+per+')</span><b>'+S(C.mes)+'</b></div><div><span>m² confirmados</span><b>'+(C.m2?nf(C.m2).replace(/\.00$/,''):'—')+'</b></div></div>';
   if(!READONLY)h+='<div class="vjbar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 8px"><span class="muted" style="font-size:12.5px">'+ico('link')+' Si dos filas son la misma venta (un cliente que compró varios lotes), márcalas a la izquierda y júntalas. Los lotes del mismo contrato de Evolta ya se juntan solos.</span><button type="button" class="btn btn-secondary btn-sm" id="vjJuntar" disabled style="margin-left:auto">Juntar como una venta</button></div>';
   h+='<div class="sec-title" style="margin-top:6px">'+ico('seal-check')+'Ventas del '+per+'</div>';
   h+=ls.length?tabla(ls,'venta',filaTot('Total confirmadas ('+C.n+')',C.m2,C.mes)+(C.n<ls.length?filaTot('Todas ('+ls.length+')',T.m2,T.mes):''))
-    :emptyHtml('tray','Ninguna venta en este periodo','Una venta aparece aquí cuando entra su cuota inicial (o su fecha de venta en Evolta es de este periodo).');
+    :emptyHtml('tray','Ninguna venta en este periodo','Una venta aparece aquí cuando entra al banco su cuota inicial.');
   var sd=LV.seps.concat(LV.desist);
   if(sd.length)h+='<div class="sec-title" style="margin-top:16px">'+ico('hourglass')+'Separaciones y desistidas · no cuentan como venta</div>'+tabla(sd,'sep',filaTot('Total',0,LV.Ts.s+LV.Td.s))
     +'<p class="nota">Cuando el cliente pague su inicial, la venta pasa sola a «Ventas» en el mes de ese pago (su separación se queda en este mes). Si no compró, en Movimientos ponle Cuota = «Separación desistida».</p>';
