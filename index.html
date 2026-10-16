@@ -755,7 +755,7 @@ var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI
 var sb=supabase.createClient(SB_URL,SB_KEY);
 var DB={movs:{},saldos:{},asesores:[],metas:{},metasPersonal:{}}, ROL='viewer', USUARIO=null, READONLY=true;
 // columnas nuevas (se detectan al cargar, para no romper si aún no existen en la BD)
-var HAS_REPARTO=false, HAS_TC=false, HAS_CAMBIO=false, HAS_ETAPA=false, HAS_LREP=false, HAS_DEV=false;
+var HAS_REPARTO=false, HAS_TC=false, HAS_CAMBIO=false, HAS_ETAPA=false, HAS_LREP=false, HAS_DEV=false, HAS_PREF=false;
 
 // ============ Config ============
 var TC={1:3.47,2:3.47,3:3.47,4:3.45,5:3.42,6:3.40,7:3.42,8:3.47,9:3.47,10:3.47,11:3.47,12:3.47};
@@ -774,6 +774,57 @@ function clasLabel(c){return CLAS_LABEL[c||'']||c;}
 var CONCEPTOS_COBRANZA=['Cuota Inicial','Separación','Saldo'];
 var CONCEPTOS_VENTAS=['Cuotas de financiamiento','Inicial','Financiamiento de la inicial'];
 var PROYECTOS=['Palta','Pitahaya'];
+// ============ Tipo de egreso según el área (se guarda en "concepto"; el mes al que corresponde en "periodo_ref") ============
+var TIPOS_EGRESO={
+  'VENTAS':['Sueldo','Comisión','Bono / incentivo','Caja de ventas','Activación / motivación','Movilidad / visita a fundo','Devolución a cliente','Otro'],
+  'MKT':['Sueldo','Agencia / freelance','Publicidad pagada (Meta, Google…)','Producción (foto, video, diseño)','Relaciones públicas','Eventos','Herramientas / software','Otro'],
+  'ADM':['Sueldo','Alquiler de oficina','Servicios (internet, teléfono, luz, agua)','AFP / planilla / impuestos','Contabilidad / legal / notaría','Caja chica / limpieza / útiles','Movilidad','Reclutamiento','Mudanza / implementación','Otro'],
+  'OPE Planta':['Sueldo / jornal','Proveedores de esquejes / plantones','Insumos (fertilizantes, riego…)','Mantenimiento / maquinaria','Flete / movilidad','Devolución a proveedor','Otro'],
+  'OPE Comex':['Sueldo','Empaques','Compra de producto','Flete / exportación','Trámites','Otro'],
+  'OPE Infra':['Obra','Materiales','Mano de obra','Otro'],
+  'DEUDA GG':['Capitalización / transferencia a Bayas y Frutos','Gasto personal de dirección','Pago de préstamo','Otro'],
+  'OTROS':['Seguros / garantías (AVLA)','Registros (SUNARP)','Plan familiar / gasto personal','Devolución de pago erróneo','Otro']};
+function tiposDe(area){return TIPOS_EGRESO[area]||[];}
+function tipoConMes(t){return /^(Sueldo|Comisión)/.test(t||'');}
+// ¿Atrasado? Si el mes al que corresponde es anterior al mes del pago
+function esAtrasado(m){return !!(m.periodoRef&&tipoConMes(m.concepto)&&m.periodoRef<ym(m.fecha));}
+// Sugerencia de tipo según área + descripción + observación (solo propone; se guarda al confirmar)
+var REGLAS_TIPO=[
+  ['VENTAS',/CAJA/,'Caja de ventas'],['VENTAS',/ACTIVACI|MOTIVACI/,'Activación / motivación'],['VENTAS',/VISITA|FUNDO|MOVILIDAD/,'Movilidad / visita a fundo'],
+  ['VENTAS',/DEVOLUCI/,'Devolución a cliente'],['VENTAS',/COMISI/,'Comisión'],['VENTAS',/BONO|INCENTIV/,'Bono / incentivo'],['VENTAS',/SUELDO|HABER|QUINCENA/,'Sueldo'],
+  ['ADM',/AFP|PLANILLA|SUNAT|IMPUEST|ESSALUD|ONP/,'AFP / planilla / impuestos'],['ADM',/INTERNET|ENTEL|TELEF|CLARO|MOVISTAR|LUZ|ENEL|LUZ DEL SUR|AGUA|SEDAPAL/,'Servicios (internet, teléfono, luz, agua)'],
+  ['ADM',/ALQUILER|OF\.? ?NUEVA|OFICINA|GARANTIA OFI/,'Alquiler de oficina'],['ADM',/COMPUTRABAJO|BUMERAN|RECLUT/,'Reclutamiento'],['ADM',/MUDANZA/,'Mudanza / implementación'],
+  ['ADM',/CAJA|LIMPIEZA|UTILES|ÚTILES/,'Caja chica / limpieza / útiles'],['ADM',/MOVILIDAD|TAXI/,'Movilidad'],['ADM',/NOTAR|CONTAB|ABOGAD|LEGAL/,'Contabilidad / legal / notaría'],['ADM',/SUELDO|HABER|QUINCENA/,'Sueldo'],
+  ['MKT',/CLAUDE|CANVA|ADOBE|SOFTWARE|SUSCRIP|WORKSPACE|CHATGPT|OPENAI/,'Herramientas / software'],['MKT',/FACEBK|FACEBOOK|META |GOOGLE ADS|TIKTOK/,'Publicidad pagada (Meta, Google…)'],['MKT',/RELACIONESPUBLICAS|RELACIONES PUBLICAS/,'Relaciones públicas'],['MKT',/SUELDO|HABER|QUINCENA/,'Sueldo'],
+  ['OPE Planta',/ESQUEJE|PLANTON/,'Proveedores de esquejes / plantones'],['OPE Planta',/DEV/,'Devolución a proveedor'],['OPE Planta',/FLETE|TRANSPORT/,'Flete / movilidad'],['OPE Planta',/FERTILIZ|RIEGO|ABONO|INSUMO/,'Insumos (fertilizantes, riego…)'],
+  ['OPE Comex',/EMPAQUE|ANYVA/,'Empaques'],['OPE Comex',/FLETE|EXPORT|ADUAN/,'Flete / exportación'],
+  ['DEUDA GG',/BAYAS Y FRUTOS/,'Capitalización / transferencia a Bayas y Frutos'],['DEUDA GG',/ROBLES NU.?.?EZ ANA KARINA/,'Gasto personal de dirección'],
+  ['OTROS',/AVLA|ALVA|GARANT/,'Seguros / garantías (AVLA)'],['OTROS',/SUNARP/,'Registros (SUNARP)'],['OTROS',/PLAN FAMILIAR/,'Plan familiar / gasto personal'],['OTROS',/ERRONEO|ERRÓNEO|PAGO ERR/,'Devolución de pago erróneo']];
+function tipoSugerido(m){if(!(m.cargo>0)||!tiposDe(m.area).length)return '';var t=cNorm((m.desc||'')+' '+(m.obs||'')+' '+(m.mov||''));
+  for(var i=0;i<REGLAS_TIPO.length;i++){var r=REGLAS_TIPO[i];if(r[0]===m.area&&r[1].test(t))return r[2];}return '';}
+// Desglose de egresos por área y tipo (S/ con dólares al TC del mes) + sugerencias pendientes
+function egresosTipoData(movs){var A={},sug=[];
+  movs.forEach(function(m){if(!(m.cargo>0)||!tiposDe(m.area).length||esMovCambio(m))return;var v=montoPEN(m,true),a=A[m.area]=A[m.area]||{area:m.area,t:0,tipos:{},sin:0,nSin:0,atr:0};a.t+=v;
+    if(m.concepto){a.tipos[m.concepto]=(a.tipos[m.concepto]||0)+v;if(esAtrasado(m))a.atr+=v;}else{a.sin+=v;a.nSin++;var s=tipoSugerido(m);if(s)sug.push({m:m,s:s});}});
+  return {areas:Object.keys(A).map(function(k){return A[k];}).sort(function(x,y){return y.t-x.t;}),sug:sug};}
+function egresosTipoHtml(movs){var D=egresosTipoData(movs);if(!D.areas.length)return '';
+  var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Egresos por tipo</h2><div class="card-sub">En qué se gastó cada área · S/ con dólares al TC del mes · según el área anotada en cada egreso</div></div>'
+    +(D.sug.length&&!READONLY?'<button type="button" class="btn btn-secondary btn-sm tipoSugAplicar" style="flex-shrink:0">'+ico('magic-wand')+'Aplicar '+D.sug.length+' sugerencia'+(D.sug.length!==1?'s':'')+'</button>':'')+'</div>';
+  h+=D.areas.map(function(a){var ts=Object.keys(a.tipos).map(function(t){return {t:t,v:a.tipos[t]};}).sort(function(x,y){return y.v-x.v;});if(a.sin)ts.push({t:'Sin tipo',v:a.sin,sin:true});
+    return '<details class="more"><summary>'+areaDot(a.area)+esc(areaLabel(a.area))+'<span class="sp"></span><b style="margin-right:8px">'+S(a.t)+'</b>'+(a.nSin?'<span class="pill warn">'+a.nSin+' sin tipo</span>':'<span class="pill ok">'+ico('check')+'</span>')+(a.atr?' <span class="pill warn" title="Sueldos o comisiones de meses anteriores">'+S(a.atr)+' atrasado</span>':'')+'<i class="ph ph-caret-down cr"></i></summary><div class="in"><div class="barlist">'
+      +ts.map(function(x){var p=a.t?x.v/a.t*100:0;return '<div class="barrow"><div class="top"><span class="n"'+(x.sin?' style="color:var(--gr-text-3)"':'')+'>'+esc(x.t)+'</span><span class="v">'+S(x.v)+'</span><span class="p">'+p.toFixed(0)+'%</span></div><div class="track"><div class="fill" style="width:'+p.toFixed(1)+'%;background:'+(x.sin?'var(--gr-border)':(AREA_COLOR[a.area]||'#64748b'))+'"></div></div></div>';}).join('')+'</div></div></details>';}).join('');
+  return h+'</div>';}
+function wireTipoSug(root,movs){Array.prototype.forEach.call(root.querySelectorAll('.tipoSugAplicar'),function(b){b.onclick=async function(){var D=egresosTipoData(movs);if(!D.sug.length)return;
+  var cnt={};D.sug.forEach(function(x){cnt[x.s]=(cnt[x.s]||0)+1;});
+  if(!confirm('¿Poner el tipo sugerido a '+D.sug.length+' egreso'+(D.sug.length!==1?'s':'')+'?\n\n'+Object.keys(cnt).map(function(k){return '· '+k+': '+cnt[k];}).join('\n')+'\n\nSolo agrega el tipo; no cambia áreas ni montos.'))return;
+  b.disabled=true;var logs=[];SILENT=true;
+  for(var i=0;i<D.sug.length;i++){var m=D.sug[i].m;m.concepto=D.sug[i].s;if(tipoConMes(m.concepto)&&!m.periodoRef)m.periodoRef=ym(m.fecha);await updateMov(m);
+    logs.push({usuario:USUARIO?USUARIO.email:'',tabla:'movimientos',clave:sigOf(m),accion:'tipo_sugerido',antes:{concepto:''},despues:{concepto:m.concepto}});}
+  SILENT=false;var r=await sb.from('conciliacion_log').insert(logs);if(r.error)console.warn('historial',r.error.message);
+  toast('Tipo puesto en '+D.sug.length+' egreso'+(D.sug.length!==1?'s':''));renderActual();};});}
+function tipoOpts(area,actual,sug){var ls=tiposDe(area),sel=actual||sug||'';
+  return '<option value="">— Sin tipo —</option>'+ls.map(function(t){return '<option value="'+esc(t)+'"'+(t===sel?' selected':'')+'>'+esc(t)+(t===sug&&!actual?' (sugerido)':'')+'</option>';}).join('')
+    +(actual&&ls.indexOf(actual)===-1?'<option value="'+esc(actual)+'" selected>'+esc(actual)+'</option>':'');}
 var REGLAS=[['MUVEX','CAMBIO'],['COMPRA DE DOLARES','CAMBIO'],['VENTA DOLARES','CAMBIO'],['ITF','BANCO'],['N/D I-BANC','BANCO'],['N/D MEGA','BANCO'],['N/D AUTORIZADA','BANCO'],['COMISION','BANCO'],['MANTENIMIENTO','BANCO'],['PORTES','BANCO'],['I-BANC + COM','BANCO'],['BAYAS Y FRUTOS','OPE Planta'],['PAJUELO ESPINO','OPE Planta'],['ENTEL','ADM'],['PAGO DE SERVICIOS','ADM'],['GRUPO INMOBILIARIO ROBLES','DEUDA GG'],['ROBLES NU','DEUDA GG'],['IZIPAY','INGRESO'],['DEP.EFECTIVO','INGRESO'],['EVOLUTION EMBOLSOS','INGRESO']];
 // Tipo de cambio del mes: el guardado en la nube manda; si no hay, el valor por defecto de TC
 function getTC(ymStr){var s=DB.saldos[ymStr];if(s&&s.tc)return s.tc;return TC[+ymStr.slice(5,7)]||3.47;}
@@ -841,8 +892,8 @@ function sigOf(m){return m.sig||[m.fecha,m.mov,m.desc,m.cargo,m.abono,m.saldoCon
 function baseKey(m){return [m.fecha,m.mov,m.desc,m.cargo,m.abono,m.moneda].join('|');}
 
 // ============ Data layer (Supabase) ============
-function rowToMov(r){return {sig:r.sig,fecha:r.fecha,mov:r.mov||'',desc:r.descripcion||'',numOp:r.numero_operacion||'',moneda:r.moneda,cargo:+r.cargo||0,abono:+r.abono||0,saldoCont:r.saldo_cont!=null?+r.saldo_cont:'',tc:r.tc!=null?+r.tc:null,area:r.area,obs:r.obs||'',asesor:r.asesor||'',clas:r.clasificacion||'',cliente:r.cliente||'',lote:r.lote||'',m2:r.m2!=null?+r.m2:'',concepto:r.concepto||'',cuota:r.cuota||'',metodoPago:r.metodo_pago||'',personal:r.personal||'',esFijo:!!r.es_fijo,proyecto:r.proyecto||'',reparto:r.reparto||'',cambioArea:r.cambio_area||'',cambioGrupo:r.cambio_grupo||'',etapa:r.etapa||'',repLotes:Array.isArray(r.lotes_rep)&&r.lotes_rep.length?r.lotes_rep:null,devDe:r.devolucion_de||''};}
-function movToRow(m){var row={sig:sigOf(m),fecha:m.fecha,mov:m.mov,descripcion:m.desc,numero_operacion:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldo_cont:(m.saldoCont===''||m.saldoCont==null)?null:m.saldoCont,tc:m.tc,area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)row.reparto=m.reparto||'';if(HAS_CAMBIO){row.cambio_area=m.cambioArea||null;row.cambio_grupo=m.cambioGrupo||null;}if(HAS_ETAPA)row.etapa=m.etapa||null;if(HAS_LREP)row.lotes_rep=m.repLotes||null;if(HAS_DEV)row.devolucion_de=m.devDe||null;return row;}
+function rowToMov(r){return {sig:r.sig,fecha:r.fecha,mov:r.mov||'',desc:r.descripcion||'',numOp:r.numero_operacion||'',moneda:r.moneda,cargo:+r.cargo||0,abono:+r.abono||0,saldoCont:r.saldo_cont!=null?+r.saldo_cont:'',tc:r.tc!=null?+r.tc:null,area:r.area,obs:r.obs||'',asesor:r.asesor||'',clas:r.clasificacion||'',cliente:r.cliente||'',lote:r.lote||'',m2:r.m2!=null?+r.m2:'',concepto:r.concepto||'',cuota:r.cuota||'',metodoPago:r.metodo_pago||'',personal:r.personal||'',esFijo:!!r.es_fijo,proyecto:r.proyecto||'',reparto:r.reparto||'',cambioArea:r.cambio_area||'',cambioGrupo:r.cambio_grupo||'',etapa:r.etapa||'',repLotes:Array.isArray(r.lotes_rep)&&r.lotes_rep.length?r.lotes_rep:null,devDe:r.devolucion_de||'',periodoRef:r.periodo_ref||''};}
+function movToRow(m){var row={sig:sigOf(m),fecha:m.fecha,mov:m.mov,descripcion:m.desc,numero_operacion:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldo_cont:(m.saldoCont===''||m.saldoCont==null)?null:m.saldoCont,tc:m.tc,area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)row.reparto=m.reparto||'';if(HAS_CAMBIO){row.cambio_area=m.cambioArea||null;row.cambio_grupo=m.cambioGrupo||null;}if(HAS_ETAPA)row.etapa=m.etapa||null;if(HAS_LREP)row.lotes_rep=m.repLotes||null;if(HAS_DEV)row.devolucion_de=m.devDe||null;if(HAS_PREF)row.periodo_ref=m.periodoRef||null;return row;}
 async function cargarNube(){
   setSync('cargando…');
   DB.movs={}; var desde=0, tam=1000, total=0;
@@ -859,6 +910,7 @@ async function cargarNube(){
   var t4=await sb.from('movimientos').select('etapa').limit(1); HAS_ETAPA=!t4.error;
   var t5=await sb.from('movimientos').select('lotes_rep').limit(1); HAS_LREP=!t5.error;
   var t6=await sb.from('movimientos').select('devolucion_de').limit(1); HAS_DEV=!t6.error;
+  var t7=await sb.from('movimientos').select('periodo_ref').limit(1); HAS_PREF=!t7.error;
   var t2=await sb.from('saldos').select('tc').limit(1); HAS_TC=!t2.error;
   var sl=await sb.from('saldos').select('*');
   if(sl.error) throw sl.error;
@@ -869,6 +921,7 @@ async function cargarNube(){
   await cargarMetasPersonal();
   if(typeof cargarConc==='function')await cargarConc();
   await cargarVentasJuntas();
+  await cargarVentasConf();
   if(!LT.stock&&!LT.cargando)ltCargar().then(function(){if(VISTA==='conc'||VISTA==='ventas'||VISTA==='consol')renderActual();});
   setSync('sincronizado ✓ ('+total+' movs)');
 }
@@ -899,7 +952,7 @@ async function guardarMetasPersonalBatch(ymStr,filas){
 }
 async function upsertMovs(list){ if(!list.length)return null; setSync('guardando…'); var r=await sb.from('movimientos').upsert(list.map(movToRow),{onConflict:'sig',ignoreDuplicates:true}); setSync(r.error?('error: '+r.error.message):'guardado ✓'); return r.error||null; }
 var obsTimers={};
-async function updateMov(m){ setSync('guardando…'); var patch={area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)patch.reparto=m.reparto||'';if(HAS_CAMBIO){patch.cambio_area=m.cambioArea||null;patch.cambio_grupo=m.cambioGrupo||null;}if(HAS_ETAPA)patch.etapa=m.etapa||null;if(HAS_LREP)patch.lotes_rep=m.repLotes||null;if(HAS_DEV)patch.devolucion_de=m.devDe||null;var r=await sb.from('movimientos').update(patch).eq('sig',sigOf(m)); setSync(r.error?('error: '+r.error.message):'guardado ✓'); if(r.error)alert('No se guardó el cambio: '+r.error.message+'\nRecarga la página para ver el dato real.'); }
+async function updateMov(m){ setSync('guardando…'); var patch={area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)patch.reparto=m.reparto||'';if(HAS_CAMBIO){patch.cambio_area=m.cambioArea||null;patch.cambio_grupo=m.cambioGrupo||null;}if(HAS_ETAPA)patch.etapa=m.etapa||null;if(HAS_LREP)patch.lotes_rep=m.repLotes||null;if(HAS_DEV)patch.devolucion_de=m.devDe||null;if(HAS_PREF)patch.periodo_ref=m.periodoRef||null;var r=await sb.from('movimientos').update(patch).eq('sig',sigOf(m)); setSync(r.error?('error: '+r.error.message):'guardado ✓'); if(r.error)alert('No se guardó el cambio: '+r.error.message+'\nRecarga la página para ver el dato real.'); }
 function updateObsDebounced(sig){ clearTimeout(obsTimers[sig]); obsTimers[sig]=setTimeout(function(){ if(DB.movs[sig])updateMov(DB.movs[sig]); },700); }
 async function guardarTC(ymStr,v){
   if(!HAS_TC){alert('Falta agregar la columna tc en la tabla saldos (ver SQL de reparto y TC).');return;}
@@ -1341,7 +1394,8 @@ function renderMes(){
   var persCard=READONLY?'':'<div class="card"><details class="more" id="persDetMov"'+(PERS_MOV_OPEN?' open':'')+'><summary>'+ico('users-three')+'Personal de la empresa<span class="sp"></span><span class="muted" style="font-weight:500;font-size:12.5px">'+DB.asesores.filter(function(a){return !a.fecha_fin||a.fecha_fin>=iso(new Date());}).length+' activos · todas las áreas</span><i class="ph ph-caret-down cr"></i></summary><div class="in">'
     +'<p class="nota" style="margin-top:0">Aquí se agrega, se cambia de área o se da de baja a cualquier persona (Ventas, Cobranza, Administración…). Lo que pongas aquí es lo que aparece al elegir <b>Personal</b> en un egreso, <b>Asesor</b> en una venta y <b>Encargado</b> en una cobranza.</p>'
     +renderAsesorMgmt('','todos')+'</div></details></div>';
-  box.innerHTML=hero+distCard+segCard+'<div class="card" id="detCard"></div>'+persCard;
+  box.innerHTML=hero+distCard+segCard+egresosTipoHtml(movs)+'<div class="card" id="detCard"></div>'+persCard;
+  wireTipoSug(box,movs);
   var pdm=$('persDetMov');if(pdm){pdm.ontoggle=function(){PERS_MOV_OPEN=pdm.open;};wireAsesorMgmt('');}
   var stc=$('saveTc');
   if(stc)stc.onclick=function(){var v=+$('tcMes').value;if(!(v>0)){alert('Escribe un tipo de cambio válido.');return;}guardarTC(f.ym,v).then(renderActual);};
@@ -1349,7 +1403,7 @@ function renderMes(){
   if(gr)gr.onclick=function(){FILTER='rev';SEARCH='';var r=movsFiltro().filter(function(m){return m.area==='REVISAR';})[0];SEL=r?sigOf(r):null;renderDetalle();$('detCard').scrollIntoView({behavior:'smooth',block:'start'});if(SEL)abrirPanelMovil();};
   renderDetalle();
 }
-function movTexto(m){return [dmy(m.fecha),m.mov,m.desc,m.moneda,String(monto(m)),fmtMon(m),esIngreso(m)?'ingreso':'egreso',areaLabel(m.area),esIngreso(m)?clasLabel(m.clas):'',m.asesor,m.personal,m.obs||'',m.esFijo?'fijo':''].join(' ').toLowerCase();}
+function movTexto(m){return [dmy(m.fecha),m.mov,m.desc,m.moneda,String(monto(m)),fmtMon(m),esIngreso(m)?'ingreso':'egreso',areaLabel(m.area),esIngreso(m)?clasLabel(m.clas):'',m.asesor,m.personal,m.obs||'',m.esFijo?'fijo':'',!esIngreso(m)?(m.concepto||'')+(esAtrasado(m)?' atrasado':''):''].join(' ').toLowerCase();}
 function cambioTag(m){if(!m.cambioGrupo)return '<span class="pill ex" title="Falta enlazar la salida, la entrada y los pagos">sin enlazar</span>';var r=resumenCambio(movsGrupo(m.cambioGrupo)),e=CAMBIO_ESTADO[r.estado];return (m.cambioArea?'<span class="s">'+esc(areaLabel(m.cambioArea))+'</span>':'')+'<span class="pill '+e[0]+'">'+e[1]+(r.tc?' · TC '+r.tc.toFixed(3):'')+'</span>';}
 function clsHtml(m){
   if(esIngreso(m)){var c=m.clas;var col=c==='VENTAS'?'#16a34a':c==='COBRANZA'?'#0ea5e9':c==='OTROS'?'#64748b':c==='FINANCIAMIENTO'?'#a78bfa':c==='CAMBIO'?'#14b8a6':'#94a3b8';
@@ -1357,7 +1411,7 @@ function clsHtml(m){
   if(m.esFijo)return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:var(--gr-brand)"></span>Costo fijo</span><span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>'+esc(repartoTxt(m))+'</span></span>'+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+'</div>';
   if(m.area==='CAMBIO')return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:#14b8a6"></span>Cambio de moneda</span>'+cambioTag(m)+'</div>';
   if(m.area==='REVISAR')return '<span class="clspill rev"><span class="dot round" style="background:var(--gr-neg)"></span>REVISAR</span>';
-  return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+(AREA_COLOR[m.area]||'#64748b')+'"></span>'+esc(areaLabel(m.area))+'</span>'+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+(m.esFijo?'<span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>Fijo · '+esc(repartoTxt(m))+'</span></span>':'')+'</div>';
+  return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+(AREA_COLOR[m.area]||'#64748b')+'"></span>'+esc(areaLabel(m.area))+'</span>'+(m.concepto?'<span class="s">'+esc(m.concepto)+(tipoConMes(m.concepto)&&m.periodoRef?' · '+esc(mesCorto(m.periodoRef)):'')+'</span>'+(esAtrasado(m)?'<span class="pill warn">atrasado</span>':''):'')+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+(m.esFijo?'<span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>Fijo · '+esc(repartoTxt(m))+'</span></span>':'')+'</div>';
 }
 function detBase(){var s=SEARCH.trim().toLowerCase();return movsFiltro().filter(function(m){return !s||movTexto(m).indexOf(s)!==-1;});}
 function detFiltrados(base){return base.filter(function(m){
@@ -1420,6 +1474,9 @@ function panelHtml(){
       var dvOrig=m.devDe&&DB.movs[m.devDe];
       if(dvOrig)h+='<div class="alert warn" style="align-items:center">'+ico('arrow-u-up-left')+'<span>Devolución de la separación de <b>'+esc(dvOrig.cliente||dvOrig.desc||dvOrig.mov)+'</b> del '+dmy(dvOrig.fecha)+'</span><button type="button" class="btn btn-ghost btn-sm" id="pDevQuitar" style="margin-left:auto">Quitar enlace</button></div>';
       h+='<label class="pfield">Área'+(m.esFijo?' <span class="muted3" style="font-weight:500">(no se usa: es costo fijo y va según el cuadro)</span>':'')+'<select id="pArea">'+AREAS.filter(function(a){return a!=='INGRESO'||m.area==='INGRESO';}).map(function(a){return '<option value="'+a+'"'+(m.area===a?' selected':'')+'>'+esc(areaLabel(a))+'</option>';}).join('')+'</select></label>'
+        +(function(){var sug=m.concepto?'':tipoSugerido(m),t=m.concepto||sug;
+          return '<div class="ci-row" id="pTipoRow"'+(tiposDe(m.area).length?'':' style="display:none"')+'><label class="pfield">Tipo de egreso'+(sug?' <span class="pill brand" style="font-size:10.5px">sugerido</span>':'')+'<select id="pTipo">'+tipoOpts(m.area,m.concepto,sug)+'</select></label>'
+            +'<label class="pfield" id="pPerW"'+(tipoConMes(t)?'':' style="display:none"')+'>Mes al que corresponde'+(esAtrasado(m)?' <span class="pill warn" style="font-size:10.5px">atrasado</span>':'')+'<input type="month" id="pPer" value="'+esc(m.periodoRef||'')+'" placeholder="'+ym(m.fecha)+'"></label></div>';})()
         +'<label class="pfield">Personal<select id="pPers">'+personalOpts(m.personal,ym(m.fecha)).replace('>—<','>— Ninguno —<')+'</select></label>'
         +'<div class="fijobox"><label><input type="checkbox" class="chk" id="pFijo"'+(m.esFijo?' checked':'')+'>Es costo fijo</label>'
           +(m.esFijo?'<button class="repbtn" id="pRep" title="Elegir entre qué áreas se reparte">÷ '+esc(repartoTxt(m))+'</button>':'<span class="muted3" style="font-size:11.5px" id="pRepHint"></span>')+'</div>';
@@ -1458,10 +1515,16 @@ function wireDet(lista){
   Array.prototype.forEach.call(document.querySelectorAll('.devQuitar'),function(b){b.onclick=function(){quitarDevolucion(decodeURIComponent(b.dataset.sig));};});
   var pdq=$('pDevQuitar');if(pdq)pdq.onclick=function(){quitarDevolucion(SEL);};
   var pf=$('pFijo'),ph=$('pRepHint');if(pf&&ph)pf.onchange=function(){ph.textContent=pf.checked?'Guarda para elegir el reparto':'';};
+  // Tipo de egreso: la lista depende del área; "Mes al que corresponde" solo para sueldos y comisiones
+  var pa=$('pArea'),pt=$('pTipo');
+  function verMes(){var w=$('pPerW');if(w)w.style.display=tipoConMes(pt.value)?'':'none';}
+  if(pt){pt.onchange=verMes;if(pa)pa.addEventListener('change',function(){var m=DB.movs[SEL]||{},v=pt.value,ls=tiposDe(pa.value);
+    pt.innerHTML=tipoOpts(pa.value,ls.indexOf(v)!==-1?v:'',tipoSugerido(Object.assign({},m,{area:pa.value})));$('pTipoRow').style.display=ls.length?'':'none';verMes();});}
 }
 function leerPanel(m){
   if(esIngreso(m)){m.clas=$('pClas').value;m.asesor=$('pAses').value;if($('pLoteQ')&&leerIngresoCampos(m,'p')===false)return false;}
-  else{m.area=$('pArea').value;m.personal=$('pPers').value;m.esFijo=$('pFijo').checked;}
+  else{m.area=$('pArea').value;m.personal=$('pPers').value;m.esFijo=$('pFijo').checked;
+    if($('pTipo')){m.concepto=tiposDe(m.area).length?$('pTipo').value:'';m.periodoRef=tipoConMes(m.concepto)?($('pPer').value||ym(m.fecha)):'';}}
   m.obs=$('pObs').value;
 }
 async function guardarPanel(siguiente){
@@ -1693,9 +1756,14 @@ function renderCAC(){
       +'<div class="ln"><div class="track"><div class="fill" style="width:'+(r.ingreso/maxV*100).toFixed(1)+'%;background:var(--gr-pos)"></div></div><span>'+S(r.ingreso)+'</span></div>'
       +'<div class="ln"><div class="track"><div class="fill" style="width:'+(r.cacTotal/maxV*100).toFixed(1)+'%;background:var(--gr-neg)"></div></div><span class="neg">'+S(r.cacTotal)+'</span></div></div>';}).join('')+'</div></div>';
   function sub(v,ing){return '<div class="stack"><span>'+S(v)+'</span>'+(ing?'<span class="small">'+(v/ing*100).toFixed(1)+'%</span>':'')+'</div>';}
+  // Costo de ventas de cada asesor por tipo: sueldo, comisión, otros · y cuánto fue atrasado
+  var SPL={};movsFiltro().forEach(function(m){if(!(m.cargo>0)||m.area!=='VENTAS'||m.esFijo||!m.personal)return;var o=SPL[m.personal]=SPL[m.personal]||{su:0,co:0,ot:0,st:0,at:0},v=montoPEN(m,true);
+    if(/^Sueldo/.test(m.concepto||''))o.su+=v;else if(m.concepto==='Comisión')o.co+=v;else if(m.concepto)o.ot+=v;else o.st+=v;if(esAtrasado(m))o.at+=v;});
+  function splitTxt(n){var o=SPL[n];if(!o)return '';var ps=[];if(o.su)ps.push('sueldo '+S(o.su));if(o.co)ps.push('comisión '+S(o.co));if(o.ot)ps.push('otros '+S(o.ot));if(o.st)ps.push('sin tipo '+S(o.st));
+    return '<div class="sub" style="white-space:normal;line-height:1.35">'+ps.join(' · ')+(o.at?' · <span class="neg">atrasado '+S(o.at)+'</span>':'')+'</div>';}
   var tabla='<div class="card"><div class="card-head"><div><h2 class="card-title">CAC por asesor</h2><div class="card-sub">El % pequeño es sobre el ingreso de ese asesor</div></div></div>'
     +'<div class="tablewrap"><table class="table cards"><thead><tr><th>Asesor</th><th class="num">Costo ventas</th><th class="num">Asig. mkt</th><th class="num">Asig. fijos</th><th class="num">CAC total</th><th class="num">% CAC</th></tr></thead><tbody>'
-    +d.rows.map(function(r){return '<tr><td class="full" style="min-width:120px"><b class="nowrap">'+esc(r.asesor)+'</b><div class="sub nowrap">'+S(r.ingreso)+'</div></td><td class="num" data-l="Costo ventas">'+sub(r.costoVentas,r.ingreso)+'</td><td class="num" data-l="Asig. mkt">'+sub(r.mkt,r.ingreso)+'</td><td class="num" data-l="Asig. fijos">'+sub(r.fijos,r.ingreso)+'</td><td class="num" data-l="CAC total"><b>'+S(r.cacTotal)+'</b></td><td class="num" data-l="% CAC"><div class="stack" style="gap:3px"><b>'+(r.ingreso?r.pctCac.toFixed(1)+'%':'—')+'</b><span class="pill '+CAC_PILL[r.clas]+'">'+CLAS_CAC_LABEL[r.clas]+'</span></div></td></tr>';}).join('')
+    +d.rows.map(function(r){return '<tr><td class="full" style="min-width:120px"><b class="nowrap">'+esc(r.asesor)+'</b><div class="sub nowrap">'+S(r.ingreso)+'</div></td><td class="num" data-l="Costo ventas">'+sub(r.costoVentas,r.ingreso)+splitTxt(r.asesor)+'</td><td class="num" data-l="Asig. mkt">'+sub(r.mkt,r.ingreso)+'</td><td class="num" data-l="Asig. fijos">'+sub(r.fijos,r.ingreso)+'</td><td class="num" data-l="CAC total"><b>'+S(r.cacTotal)+'</b></td><td class="num" data-l="% CAC"><div class="stack" style="gap:3px"><b>'+(r.ingreso?r.pctCac.toFixed(1)+'%':'—')+'</b><span class="pill '+CAC_PILL[r.clas]+'">'+CLAS_CAC_LABEL[r.clas]+'</span></div></td></tr>';}).join('')
     +'</tbody></table></div>'
     +'<details class="more"><summary>'+ico('calculator')+'Cómo se repartió Marketing y Fijos<span class="sp"></span><i class="ph ph-caret-down cr"></i></summary><div class="in"><div class="ro-grid">'
       +'<span>Personal activo (todas las áreas, para Fijos)</span><span>'+d.nPersonal+' personas</span><span>Total Fijos del período</span><span>'+S(d.fijosTotal)+'</span><span>Fijos por persona</span><span>'+S(d.fijosPorAsesor)+' ('+S(d.fijosTotal)+' ÷ '+d.nPersonal+')</span>'
@@ -2108,56 +2176,118 @@ async function separarVenta(grupo){
   if(r.error){setSync('error: '+r.error.message);alert('No se pudo separar: '+r.error.message);return;}
   cs.forEach(function(c){delete VJ[c];});await registrarCambio('ventas_juntas',grupo,'separar',{claves:cs},null);setSync('guardado ✓');renderActual();}
 
-// Ventas del periodo agrupadas por venta (contrato o lote): nuevas (primer pago en el periodo) y de meses anteriores
+// ============ Ventas reales: fecha de venta, separaciones, desistidas y confirmación ============
+// Fecha de venta: la del contrato de Evolta; si no está, el primer pago de Ventas que no es separación (la inicial).
+// Si solo hay separaciones, aún no es venta. Si separó un mes y pagó la inicial al siguiente, la VENTA cuenta en el mes de la inicial,
+// pero el DINERO se respeta en su mes: en cada periodo solo suma lo que entró en ese periodo (el acumulado es solo referencia).
+var VC={};          // ventas confirmadas a mano: clave → {ym}
+async function cargarVentasConf(){var r=await sb.from('ventas_confirmadas').select('clave,ym');VC={};if(!r.error)(r.data||[]).forEach(function(x){VC[x.clave]=x;});}
+function clavesVenta(g){return [g.k].concat(g.bases.filter(function(b){return b!==g.k;}));}
+function ventaConfirmada(g){return clavesVenta(g).some(function(c){return !!VC[c];});}
+var LV_G={};        // grupos pintados en pantalla (para los botones)
+async function confirmarVenta(k,si){
+  var g=LV_G[k];if(!g||READONLY)return;var cs=clavesVenta(g),r;setSync('guardando…');
+  if(si){var rows=cs.map(function(c){return {clave:c,ym:(g.fechaVenta||'').slice(0,7),usuario:USUARIO?USUARIO.email:'',updated_at:new Date().toISOString()};});
+    r=await sb.from('ventas_confirmadas').upsert(rows,{onConflict:'clave'});if(!r.error)rows.forEach(function(x){VC[x.clave]=x;});}
+  else{r=await sb.from('ventas_confirmadas').delete().in('clave',cs);if(!r.error)cs.forEach(function(c){delete VC[c];});}
+  if(r.error){setSync('error: '+r.error.message);alert('No se guardó: '+r.error.message);renderActual();return;}
+  await registrarCambio('ventas_confirmadas',g.k,si?'confirmar':'quitar_confirmacion',null,{claves:cs,ym:(g.fechaVenta||'').slice(0,7)});
+  setSync('guardado ✓');renderActual();}
+// Todas las ventas (agrupadas por contrato/lote/cliente) con su estado y fecha de venta
+function infoVentas(){
+  var G={};
+  allMovs().forEach(function(m){if(!esVentaCob(m))return;partesMov(m).forEach(function(p){var k=ventaKey(p);if(!k)return;
+    var g=G[k]=G[k]||{k:k,parts:[],ms:[],bases:[],cli:'',primer:'',sep:'',fv:'',desist:false,cob:false};
+    g.parts.push(p);if(g.ms.indexOf(m)===-1)g.ms.push(m);var b=loteKey(p);if(b&&g.bases.indexOf(b)===-1)g.bases.push(b);
+    if(m.cliente&&!g.cli)g.cli=m.cliente;if(!g.primer||m.fecha<g.primer)g.primer=m.fecha;
+    var c=cuotaParse(p.cuota).k;
+    if(c==='DESIST')g.desist=true;
+    else if(c==='SEP'){if(!g.sep||m.fecha<g.sep)g.sep=m.fecha;}
+    else if(m.clas==='COBRANZA'||c==='FIN'||c==='SALDO')g.cob=true;
+    else if(!g.fv||m.fecha<g.fv)g.fv=m.fecha;});});
+  Object.keys(G).forEach(function(k){var g=G[k],c=contratoDe(k);g.contrato=c;
+    // Sin contrato: si ya pagaba cuotas (cobranza) antes de su primera "inicial", la venta es anterior (desde su primer pago)
+    g.fechaVenta=c&&c.fecha_venta?String(c.fecha_venta).slice(0,10):(!c&&g.cob&&(!g.fv||g.fv>g.primer)?g.primer:g.fv)||'';
+    g.estado=g.desist?'desist':g.fechaVenta?'venta':'sep';
+    g.lote=lotesTexto(g.parts);if(!g.cli&&c)g.cli=c.titular;g.manual=esJuntaManual(k);g.m2=m2DeGrupo(g.parts)||null;g.conf=g.estado==='venta'&&ventaConfirmada(g);});
+  return G;}
+// Ventas del periodo: del periodo (fecha de venta en el periodo), separaciones, desistidas y pagos de ventas de meses anteriores
 function lotesVentas(movs){
-  var enP=periodoConc(),pp={},G={},sinLote={s:0,ms:[]},parts={},fin=CV.ym.length===4?CV.ym+'-12-31':CV.ym+'-31',acum={};
-  allMovs().forEach(function(m){if(!esVentaCob(m))return;partesMov(m).forEach(function(p){var k=ventaKey(p);if(!k)return;(parts[k]=parts[k]||[]).push(p);if(!pp[k]||m.fecha<pp[k])pp[k]=m.fecha;if(m.fecha<=fin)acum[k]=(acum[k]||0)+p.s;});});
+  var enP=periodoConc(),ini=CV.ym.length===4?CV.ym+'-01-01':CV.ym+'-01',fin=CV.ym.length===4?CV.ym+'-12-31':CV.ym+'-31',G=infoVentas(),mes={},dep={},msP={},sinLote={s:0,ms:[]};
   movs.forEach(function(m){if(!(m.abono>0)||m.clas!=='VENTAS'||!enP(m.fecha))return;partesMov(m).forEach(function(pt){var k=ventaKey(pt);
-    if(!k){sinLote.s+=pt.s;sinLote.ms.push(m);return;}
-    var g=G[k]=G[k]||{k:k,lote:'',cli:'',mes:0,dep:0,ms:[]};g.mes+=pt.s;g.dep++;if(g.ms.indexOf(m)===-1)g.ms.push(m);if(m.cliente&&!g.cli)g.cli=m.cliente;});});
-  var ant={n:0,s:0,ls:[]};
-  var ls=Object.keys(G).map(function(k){var g=G[k],c=contratoDe(k);g.lote=lotesTexto(parts[k]||[]);g.contrato=c;if(!g.cli&&c)g.cli=c.titular;g.manual=esJuntaManual(k);
-      g.m2=m2DeGrupo(parts[k]||[])||null;g.pm2=g.m2?g.mes/g.m2:null;g.fecha=pp[k]||'';g.acum=acum[k]||g.mes;return g;})
-    .filter(function(g){if(g.fecha&&!enP(g.fecha)){ant.n++;ant.s+=g.mes;ant.ls.push(g);return false;}return true;}).sort(function(a,b){return b.mes-a.mes;});
-  var T={mes:0,m2:0,m2con:0};ls.forEach(function(g){T.mes+=g.mes;if(g.m2){T.m2+=g.m2;T.m2con+=g.mes;}});
-  return {ls:ls,sinLote:sinLote.s,sinLoteMs:sinLote.ms,T:T,ant:ant};
+    if(!k){sinLote.s+=pt.s;sinLote.ms.push(m);return;}mes[k]=(mes[k]||0)+pt.s;dep[k]=(dep[k]||0)+1;(msP[k]=msP[k]||[]);if(msP[k].indexOf(m)===-1)msP[k].push(m);});});
+  var ls=[],seps=[],desist=[],ant={n:0,s:0,ls:[]};
+  Object.keys(G).forEach(function(k){var g=G[k];g.mes=mes[k]||0;g.dep=dep[k]||0;g.msP=msP[k]||[];
+    g.acum=0;g.ms.forEach(function(m){if(m.fecha<=fin&&esVentaCob(m))partesMov(m).forEach(function(p){if(ventaKey(p)===k)g.acum+=p.s;});});
+    g.sepAntes=g.sep&&g.sep<ini?g.sep:'';g.pm2=g.m2?g.mes/g.m2:null;g.fecha=g.fechaVenta||g.primer;
+    if(g.estado==='venta'&&enP(g.fechaVenta)){ls.push(g);return;}
+    if(!g.mes)return;
+    if(g.estado==='sep'||(g.estado==='venta'&&g.fechaVenta>fin))seps.push(g);   // en este periodo solo separó (la venta vino después)
+    else if(g.estado==='desist')desist.push(g);
+    else{ant.n++;ant.s+=g.mes;ant.ls.push(g);}});
+  function porMes(a,b){return b.mes-a.mes||b.acum-a.acum;}
+  ls.sort(function(a,b){return (b.conf-a.conf)||b.mes-a.mes;});seps.sort(porMes);desist.sort(porMes);ant.ls.sort(porMes);
+  var T={mes:0,m2:0,m2con:0},Tc={n:0,mes:0,m2:0,m2con:0},Ts={n:seps.length,s:0},Td={n:desist.length,s:0};
+  ls.forEach(function(g){T.mes+=g.mes;if(g.m2){T.m2+=g.m2;T.m2con+=g.mes;}if(g.conf){Tc.n++;Tc.mes+=g.mes;if(g.m2){Tc.m2+=g.m2;Tc.m2con+=g.mes;}}});
+  seps.forEach(function(g){Ts.s+=g.mes;});desist.forEach(function(g){Td.s+=g.mes;});
+  return {ls:ls,seps:seps,desist:desist,sinLote:sinLote.s,sinLoteMs:sinLote.ms,T:T,Tc:Tc,Ts:Ts,Td:Td,ant:ant};
 }
-// Indicadores de ventas del periodo
+// Indicadores de ventas del periodo: solo ventas confirmadas (lo real); el dinero siempre es el que entró en el periodo
 function erVentasHtml(movs){
-  var enP=periodoConc(),LV=lotesVentas(movs),A=areasConTC(movs,cambiosMoneda(enP)),gV=A['VENTAS'].eq,gM=A['MKT'].eq,n=LV.ls.length,T=LV.T,tv=T.mes+LV.sinLote+LV.ant.s;
-  var top=LV.ls.filter(function(g){return g.pm2!=null;}).sort(function(a,b){return b.pm2-a.pm2;});
+  var enP=periodoConc(),LV=lotesVentas(movs),A=areasConTC(movs,cambiosMoneda(enP)),gV=A['VENTAS'].eq,gM=A['MKT'].eq,n=LV.ls.length,C=LV.Tc,nc=C.n,tv=LV.T.mes+LV.Ts.s+LV.Td.s+LV.sinLote+LV.ant.s,per=CV.ym.length===4?'año':'mes';
+  var pc=LV.ls.filter(function(g){return g.conf&&g.contrato&&g.contrato.precio&&g.m2;}),prec=pc.reduce(function(a,g){return a+(+g.contrato.precio||0);},0),precM2=pc.reduce(function(a,g){return a+g.m2;},0);
+  var sepAnt=LV.ls.filter(function(g){return g.conf&&g.sepAntes;}).length;
   function m2t(x){return nf(x).replace(/\.00$/,'')+' m²';}
-  return '<div class="card"><div class="card-head"><div><h2 class="card-title">Indicadores de ventas</h2><div class="card-sub">Con el dinero que entró al banco como ventas</div></div></div>'
+  var falta=n-nc;
+  return '<div class="card"><div class="card-head"><div><h2 class="card-title">Indicadores de ventas</h2><div class="card-sub">Solo ventas confirmadas · sin separaciones ni desistidas · dinero que entró en el '+per+'</div></div></div>'
+    +(falta>0&&!READONLY?'<div class="alert warn" style="margin-bottom:10px">'+ico('seal-question')+'<span>Hay <b>'+falta+'</b> venta'+(falta!==1?'s':'')+' del '+per+' sin confirmar. Confírmalas en <b>Ventas del '+per+'</b> (abajo) para que cuenten aquí.</span></div>':'')
     +'<div class="kv">'
-    +'<div><span>Ventas en el banco</span><b>'+S(tv)+'</b><em>'+n+' venta'+(n!==1?'s':'')+' nueva'+(n!==1?'s':'')+' por '+S(T.mes)+(T.m2?' · '+m2t(T.m2):'')+(LV.ant.n?' · '+S(LV.ant.s)+' de ventas anteriores':'')+(LV.sinLote>1?' · '+S(LV.sinLote)+' sin lote ni cliente':'')+'</em></div>'
-    +'<div><span>Precio por m² (lo que entró)</span><b>'+(T.m2?S(T.m2con/T.m2):'—')+'</b><em>'+(top.length>1?'de '+S(top[top.length-1].pm2)+' a '+S(top[0].pm2)+' según el lote':top.length?'':'anota los m² de cada venta en Movimientos')+'</em></div>'
-    +'<div><span>Promedio por venta nueva</span><b>'+(n?S(T.mes/n):'—')+'</b><em>lo que entró por cada venta nueva</em></div>'
-    +'<div><span>Costo de vender (Ventas + Mkt)</span><b>'+(n?S((gV+gM)/n):'—')+'</b><em>por venta nueva ('+n+') · '+(tv?((gV+gM)/tv*100).toFixed(1):'0')+'% de las ventas del banco</em></div>'
+    +'<div><span>Ventas reales</span><b>'+nc+(n!==nc?' <small class="muted" style="font-weight:500">de '+n+'</small>':'')+'</b><em>'+(nc?S(C.mes)+' entró en el '+per+' por ellas'+(C.m2?' · '+m2t(C.m2):'')+(sepAnt?' · '+sepAnt+' separó en un mes anterior (ese dinero quedó en su mes)':''):'confirma las ventas del periodo')+'</em></div>'
+    +'<div><span>Precio por m²</span><b>'+(precM2?S(prec/precM2):'—')+'</b><em>'+(precM2?'precio de venta en Evolta · '+pc.length+' venta'+(pc.length!==1?'s':''):'sale del contrato en Evolta de las ventas confirmadas')+'</em></div>'
+    +'<div><span>Promedio por venta</span><b>'+(nc?S(C.mes/nc):'—')+'</b><em>lo que entró en el '+per+' por cada venta confirmada'+(prec&&pc.length?' · precio promedio '+S(prec/pc.length):'')+'</em></div>'
+    +'<div><span>Costo de vender (Ventas + Mkt)</span><b>'+(nc?S((gV+gM)/nc):'—')+'</b><em>por venta confirmada · '+S(gV+gM)+' en el '+per+'</em></div>'
+    +'<div><span>Dinero de ventas en el banco</span><b>'+S(tv)+'</b><em>todo lo que entró como ventas · '+S(LV.T.mes)+' de ventas del '+per+(LV.ant.n?' · '+S(LV.ant.s)+' de ventas anteriores':'')+(LV.Ts.n?' · '+S(LV.Ts.s)+' de '+LV.Ts.n+' separacion'+(LV.Ts.n!==1?'es':'')+' que aún no son venta':'')+(LV.Td.n?' · '+S(LV.Td.s)+' desistid'+(LV.Td.n!==1?'as':'a'):'')+(LV.sinLote>1?' · '+S(LV.sinLote)+' sin lote ni cliente':'')+'</em></div>'
     +'</div></div>';
 }
-// Ventas nuevas del mes (sección plegable)
+// Ventas del periodo (sección plegable): ventas con confirmación, separaciones/desistidas y pagos de ventas anteriores
 function lotesMesHtml(movs){
-  var LV=lotesVentas(movs),ls=LV.ls,T=LV.T,per=CV.ym.length===4?'año':'mes';
-  var tit='Ventas nuevas del '+per,res=ls.length+' venta'+(ls.length!==1?'s':'')+' nueva'+(ls.length!==1?'s':'')+' · '+S(T.mes)+(T.m2?' · '+S(T.m2con/T.m2)+' por m²':'');
-  var h='<p class="nota" style="margin-top:0">Lotes cuyo primer pago entró al banco en el '+per+'. Cliente, lote y m² salen de lo anotado en Movimientos; toca una fila para completarlos.</p>';
-  h+='<div class="vmini"><div><span>Ventas nuevas</span><b>'+ls.length+'</b></div><div><span>m²</span><b>'+(T.m2?nf(T.m2).replace(/\.00$/,''):'—')+'</b></div><div><span>Precio por m² (lo que entró)</span><b>'+(T.m2?S(T.m2con/T.m2):'—')+'</b></div></div>';
-  if(!ls.length)return plegable('lotes',tit,res,h+emptyHtml('tray','Ninguna venta nueva en este periodo','Los ingresos clasificados como ventas aparecen aquí cuando tienen cliente o lote.'));
-  if(!READONLY)h+='<div class="vjbar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 8px"><span class="muted" style="font-size:12.5px">'+ico('link')+' Si dos filas son la misma venta (un cliente que compró varios lotes), márcalas y júntalas. Los lotes del mismo contrato de Evolta ya se juntan solos.</span><button type="button" class="btn btn-secondary btn-sm" id="vjJuntar" disabled style="margin-left:auto">Juntar como una venta</button></div>';
-  h+='<div class="tablewrap lotesmes"><table class="table cards"><thead><tr>'+(READONLY?'':'<th style="width:32px"></th>')+'<th>Lote · cliente</th><th class="num">m²</th><th class="num">Entró en el '+per+'</th><th class="num">S/ por m²</th><th class="num">Acumulado</th></tr></thead><tbody>'
-    +ls.map(function(g){
-      return '<tr class="click" data-sig="'+encodeURIComponent(g.ms[0].sig)+'">'+(READONLY?'':'<td class="ck" data-l=""><input type="checkbox" class="chk vjchk" data-k="'+esc(g.k)+'" aria-label="Elegir para juntar"></td>')
-        +'<td class="full"><b>'+esc(g.lote||'Sin lote')+'</b>'+(!g.lote?' <span class="pill warn">Falta lote</span>':'')+(!g.m2?' <span class="pill warn">Falta m²</span>':'')
-        +(g.contrato&&g.lote.indexOf('+')!==-1?' <span class="pill ok" title="Contrato de Evolta: '+esc(g.contrato.titular||'')+'">Un contrato</span>':'')
-        +(g.manual?' <span class="pill brand">Juntada a mano</span>'+(READONLY?'':' <button type="button" class="btn btn-ghost btn-sm vjSep" data-g="'+esc(g.k)+'">Separar</button>'):'')
-        +'<div class="sub">'+esc(g.cli||'Sin cliente')+(g.ms.length>1?' · '+g.ms.length+' pagos':'')+(g.fecha?' · primer pago '+dmy(g.fecha):'')+'</div></td>'
-        +'<td class="num" data-l="m²">'+(g.m2?nf(g.m2):'—')+'</td>'
-        +'<td class="num" data-l="Entró en el '+per+'"><b>'+S(g.mes)+'</b><div class="sub">'+g.dep+' depósito'+(g.dep!==1?'s':'')+'</div></td>'
-        +'<td class="num" data-l="S/ por m²"><b>'+(g.pm2!=null?S(g.pm2):'—')+'</b></td>'
-        +'<td class="num" data-l="Acumulado">'+S(g.acum)+'</td></tr>';}).join('')
-    +'<tr class="total">'+(READONLY?'':'<td></td>')+'<td>Total</td><td class="num" data-l="m²">'+(T.m2?nf(T.m2):'')+'</td><td class="num" data-l="Entró">'+S(T.mes)+'</td><td class="num" data-l="S/ por m²">'+(T.m2?S(T.m2con/T.m2):'')+'</td><td></td></tr></tbody></table></div>'
-    +(LV.ant.n?'<p class="nota">No se listan <b>'+LV.ant.n+'</b> venta'+(LV.ant.n!==1?'s':'')+' de meses anteriores que siguen pagando su inicial ('+S(LV.ant.s)+'): '+LV.ant.ls.map(function(g){return esc(g.lote||g.cli||'—')+' desde '+dmy(g.fecha);}).join(', ')+'.</p>':'')
-    +(LV.sinLote>1?'<p class="nota"><b>'+S(LV.sinLote)+'</b> de ventas aún no tienen cliente ni lote: complétalos en Pendientes.</p>':'')
-    +'<p class="nota">El precio por m² es lo que entró en el periodo entre los m² del lote. El acumulado suma todo lo que entró al banco para ese lote hasta el cierre del periodo.</p>';
+  var LV=lotesVentas(movs),ls=LV.ls,T=LV.T,C=LV.Tc,per=CV.ym.length===4?'año':'mes';LV_G={};
+  ls.concat(LV.seps,LV.desist,LV.ant.ls).forEach(function(g){LV_G[g.k]=g;});
+  var tit='Ventas del '+per,res=ls.length+' venta'+(ls.length!==1?'s':'')+' · '+C.n+' confirmada'+(C.n!==1?'s':'')+(LV.Ts.n?' · '+LV.Ts.n+' separaci'+(LV.Ts.n!==1?'ones':'ón'):'')+(LV.ant.n?' · '+LV.ant.n+' de meses anteriores':'');
+  function tags(g){return (!g.lote?' <span class="pill warn">Falta lote</span>':'')+(!g.m2&&g.estado==='venta'?' <span class="pill warn">Falta m²</span>':'')
+    +(g.contrato&&g.lote.indexOf('+')!==-1?' <span class="pill ok" title="Contrato de Evolta: '+esc(g.contrato.titular||'')+'">Un contrato</span>':'')
+    +(g.manual?' <span class="pill brand">Juntada a mano</span>'+(READONLY?'':' <button type="button" class="btn btn-ghost btn-sm vjSep" data-g="'+esc(g.k)+'">Separar</button>'):'');}
+  function fila(g,modo){var mv=g.msP[0]||g.ms[0],est=modo==='sep'?sepEstado(mv):null;
+    var ult='';
+    if(modo==='venta')ult='<td data-l="¿Venta real?" style="text-align:center">'+(READONLY?(g.conf?'<span class="pill ok">'+ico('check')+' Confirmada</span>':'<span class="pill warn">Por confirmar</span>')
+        :'<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12.5px;font-weight:600'+(g.conf?';color:var(--gr-pos-ink)':'')+'"><input type="checkbox" class="chk vcchk" data-k="'+esc(g.k)+'"'+(g.conf?' checked':'')+'>'+(g.conf?'Confirmada':'Confirmar')+'</label>')+'</td>';
+    else if(modo==='sep')ult='<td data-l="Estado" style="text-align:center">'+(g.estado==='desist'?'<span class="pill ex">Desistida</span>':g.estado==='venta'?'<span class="pill ok" title="Su venta cuenta en '+esc(mesLargo(g.fechaVenta.slice(0,7)))+'">Venta en '+esc(mesCorto(g.fechaVenta.slice(0,7)))+'</span>':'<span class="pill warn">Solo separación</span>')+'</td>';
+    else ult='<td data-l="" style="text-align:center"><span class="pill">Anterior</span></td>';
+    return '<tr class="click" data-sig="'+encodeURIComponent(mv.sig)+'">'+(READONLY?'':'<td class="ck" data-l=""><input type="checkbox" class="chk vjchk" data-k="'+esc(g.k)+'" aria-label="Elegir para juntar"></td>')
+      +'<td class="full"><b>'+esc(g.lote||'Sin lote')+'</b>'+tags(g)
+      +'<div class="sub">'+esc(g.cli||'Sin cliente')
+        +(modo==='venta'?' · venta '+dmy(g.fechaVenta)+(g.contrato&&g.contrato.fecha_venta?' (Evolta)':'')+(g.sepAntes?' · <b>separó el '+dmy(g.sepAntes)+'</b>':''):'')
+        +(modo==='ant'?' · venta del '+dmy(g.fechaVenta):'')
+        +(modo==='sep'?' · separó el '+dmy(g.sep||g.primer)+(g.estado==='venta'?' · se volvió venta el '+dmy(g.fechaVenta):est&&est.k==='pend'?' · '+est.dias+' días sin otro pago':''):'')+'</div></td>'
+      +'<td class="num" data-l="m²">'+(g.m2?nf(g.m2):'—')+'</td>'
+      +'<td class="num" data-l="Entró en el '+per+'"><b>'+S(g.mes)+'</b>'+(g.dep?'<div class="sub">'+g.dep+' depósito'+(g.dep!==1?'s':'')+'</div>':'')+'</td>'
+      +'<td class="num muted" data-l="Acumulado (referencia)">'+S(g.acum)+(modo==='venta'&&g.contrato&&g.contrato.precio?'<div class="sub">precio '+S(+g.contrato.precio)+'</div>':'')+'</td>'
+      +ult+'</tr>';}
+  function tabla(lista,modo,totales){var th=modo==='venta'?'¿Venta real?':modo==='sep'?'Estado':'';
+    return '<div class="tablewrap lotesmes"><table class="table cards"><thead><tr>'+(READONLY?'':'<th style="width:32px"></th>')+'<th>Lote · cliente</th><th class="num">m²</th><th class="num">Entró en el '+per+'</th><th class="num">Acumulado <span style="text-transform:none;font-weight:500">(referencia)</span></th><th style="text-align:center">'+th+'</th></tr></thead><tbody>'
+      +lista.map(function(g){return fila(g,modo);}).join('')+(totales||'')+'</tbody></table></div>';}
+  function filaTot(txt,m2,mes){return '<tr class="total">'+(READONLY?'':'<td></td>')+'<td>'+txt+'</td><td class="num" data-l="m²">'+(m2?nf(m2):'')+'</td><td class="num" data-l="Entró">'+S(mes)+'</td><td></td><td></td></tr>';}
+  var h='<p class="nota" style="margin-top:0">Una venta cuenta en el '+per+' de su <b>fecha de venta</b>: la del contrato en Evolta o, si no está, la de su primer pago que no es separación (la inicial). El <b>dinero siempre queda en el '+per+' en que entró</b>: si separó antes, esa separación se quedó en su mes; el acumulado es solo referencia. <b>Solo las ventas confirmadas</b> cuentan en el total real y en los indicadores. Toca una fila para completar cliente, lote o cuota.</p>';
+  h+='<div class="vmini"><div><span>Ventas del '+per+'</span><b>'+ls.length+'</b></div><div><span>Confirmadas</span><b'+(C.n<ls.length?' class="neg"':'')+'>'+C.n+'</b></div><div><span>Total real (entró en el '+per+')</span><b>'+S(C.mes)+'</b></div><div><span>m² confirmados</span><b>'+(C.m2?nf(C.m2).replace(/\.00$/,''):'—')+'</b></div></div>';
+  if(!READONLY)h+='<div class="vjbar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 8px"><span class="muted" style="font-size:12.5px">'+ico('link')+' Si dos filas son la misma venta (un cliente que compró varios lotes), márcalas a la izquierda y júntalas. Los lotes del mismo contrato de Evolta ya se juntan solos.</span><button type="button" class="btn btn-secondary btn-sm" id="vjJuntar" disabled style="margin-left:auto">Juntar como una venta</button></div>';
+  h+='<div class="sec-title" style="margin-top:6px">'+ico('seal-check')+'Ventas del '+per+'</div>';
+  h+=ls.length?tabla(ls,'venta',filaTot('Total confirmadas ('+C.n+')',C.m2,C.mes)+(C.n<ls.length?filaTot('Todas ('+ls.length+')',T.m2,T.mes):''))
+    :emptyHtml('tray','Ninguna venta en este periodo','Una venta aparece aquí cuando entra su cuota inicial (o su fecha de venta en Evolta es de este periodo).');
+  var sd=LV.seps.concat(LV.desist);
+  if(sd.length)h+='<div class="sec-title" style="margin-top:16px">'+ico('hourglass')+'Separaciones y desistidas · no cuentan como venta</div>'+tabla(sd,'sep',filaTot('Total',0,LV.Ts.s+LV.Td.s))
+    +'<p class="nota">Cuando el cliente pague su inicial, la venta pasa sola a «Ventas» en el mes de ese pago (su separación se queda en este mes). Si no compró, en Movimientos ponle Cuota = «Separación desistida».</p>';
+  if(LV.ant.n)h+='<div class="sec-title" style="margin-top:16px">'+ico('clock-counter-clockwise')+'Pagos de ventas de meses anteriores · no son venta nueva</div>'+tabla(LV.ant.ls,'ant',filaTot('Total',0,LV.ant.s));
+  if(LV.sinLote>1)h+='<p class="nota"><b>'+S(LV.sinLote)+'</b> de ventas aún no tienen cliente ni lote: complétalos en Pendientes.</p>';
   return plegable('lotes',tit,res,h);
 }
 
@@ -2254,10 +2384,12 @@ function renderConc(){
   var titulo=CV.ym.length===4?'Año '+CV.ym:mesLargo(CV.ym);
   var ban=nP?'<div class="banner warn"><div class="bi">'+ico('warning')+'</div><div class="bt"><b>'+titulo+': '+nP+' pendiente'+(nP!==1?'s':'')+'</b><span>'+PEND_TIPOS.filter(function(t){return P.o[t[0]].length;}).map(function(t){return P.o[t[0]].length+' '+t[1].toLowerCase();}).join(' · ')+'. Están al final, en Pendientes.</span></div></div>'
     :'<div class="banner pos"><div class="bi">'+ico('check-circle')+'</div><div class="bt"><b>'+titulo+' completo</b><span>Todo está clasificado y las ventas tienen cliente, lote y m².</span></div></div>';
-  box.innerHTML=strip+ban+'<div class="grid2">'+estadoResultadosHtml(movsP)+'<div class="colstack">'+erVentasHtml(movsP)+distribucionHtml(movsP)+'</div></div>'+cuadreBancoHtml()+destinosHtml()+lotesMesHtml(movsP)+'<div class="card" id="concDet">'+pendientesHtml(movsP)+'</div>';
+  box.innerHTML=strip+ban+'<div class="grid2">'+estadoResultadosHtml(movsP)+'<div class="colstack">'+erVentasHtml(movsP)+distribucionHtml(movsP)+'</div></div>'+cuadreBancoHtml()+destinosHtml()+egresosTipoHtml(movsP)+lotesMesHtml(movsP)+'<div class="card" id="concDet">'+pendientesHtml(movsP)+'</div>';
+  wireTipoSug(box,movsP);
   Array.prototype.forEach.call(box.querySelectorAll('.mchip'),function(b){b.onclick=function(){CV.ym=b.dataset.ym;renderConc();};});
   Array.prototype.forEach.call(box.querySelectorAll('details.plegable'),function(d){d.ontoggle=function(){CV.sec[d.dataset.sec]=d.open;};});
-  Array.prototype.forEach.call(box.querySelectorAll('.lotesmes tr[data-sig]'),function(r){r.onclick=function(e){if(e.target.closest('.ck,.vjSep'))return;abrirIngresoConc(decodeURIComponent(r.dataset.sig));};});
+  Array.prototype.forEach.call(box.querySelectorAll('.lotesmes tr[data-sig]'),function(r){r.onclick=function(e){if(e.target.closest('.ck,.vjSep,label'))return;abrirIngresoConc(decodeURIComponent(r.dataset.sig));};});
+  Array.prototype.forEach.call(box.querySelectorAll('.vcchk'),function(c){c.onchange=function(){c.disabled=true;confirmarVenta(c.dataset.k,c.checked);};});
   var vjb=$('vjJuntar'),vjc=box.querySelectorAll('.vjchk');
   function vjSel(){return Array.prototype.filter.call(vjc,function(c){return c.checked;}).map(function(c){return c.dataset.k;});}
   Array.prototype.forEach.call(vjc,function(c){c.onchange=function(){var n=vjSel().length;if(vjb){vjb.disabled=n<2;vjb.textContent=n>=2?'Juntar '+n+' como una venta':'Juntar como una venta';}};});
@@ -2296,9 +2428,9 @@ function areasConTC(movs,cm){
 }
 // Estado de resultados del periodo (base caja): ventas y cobranza según la clasificación del banco, S/ con dólares al TC del mes
 function estadoResultadosHtml(movs){
-  var t={ventas:0,cob:0,otrosIng:0,otros:0,fin:0,interno:0},cm=cambiosMoneda(periodoConc());
+  var t={ventas:0,cob:0,otrosIng:0,otros:0,fin:0,devGG:0,interno:0},cm=cambiosMoneda(periodoConc());
   movs.forEach(function(m){if(!(m.abono>0)||cm.set[m.sig])return;var s=solesDe(m);
-    if(m.clas==='FINANCIAMIENTO'){t.fin+=s;return;}
+    if(m.clas==='FINANCIAMIENTO'){if(esDevolucionGG(m))t.devGG+=s;else t.fin+=s;return;}
     if(m.clas==='VENTAS')t.ventas+=s;else if(m.clas==='COBRANZA')t.cob+=s;else if(m.clas==='OTROS')t.otrosIng+=s;else t.otros+=s;});
   var LV=lotesVentas(movs),nl=LV.ls.length;
   var A=areasConTC(movs,cm),ope=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],otros=['BANCO','DVO','OTROS'];
@@ -2307,7 +2439,7 @@ function estadoResultadosHtml(movs){
   var rev=movs.filter(function(m){return m.cargo>0&&m.area==='REVISAR';}).reduce(function(a,m){return a+montoPEN(m,true);},0);
   function L(tx,v,cls,sub){return '<tr class="'+(cls||'')+'"><td>'+tx+(sub?'<div class="sub">'+sub+'</div>':'')+'</td><td class="num">'+(v<0?'('+S(-v)+')':S(v))+'</td><td class="num muted3">'+(ing?(v/ing*100).toFixed(1)+'%':'')+'</td></tr>';}
   return '<div class="card"><div class="card-head"><div><h2 class="card-title">Estado de resultados</h2><div class="card-sub">Base caja · lo que entró y salió del banco, según su clasificación · '+(cm.tc?'dólares al TC pagado ('+cm.tc.toFixed(3)+')':'dólares al TC del mes')+'</div></div></div>'+(cm.sinPar.length?'<div class="alert warn" style="margin-bottom:10px">'+ico('warning')+'<span>'+cm.sinPar.map(function(m){return 'Cambio de moneda del '+dmy(m.fecha)+' por '+(m.moneda==='USD'?U(m.cargo||m.abono):S(m.cargo||m.abono));}).join(', ')+': '+(cm.sinPar.length>1?'no tienen':'no tiene')+' su pareja en la otra cuenta. Enlázalo en Movimientos (Armar el cambio) o revisa que el estado de cuenta en '+(cm.sinPar[0].moneda==='PEN'?'dólares':'soles')+' esté cargado completo.</span></div>':'')+'<div class="tablewrap"><table class="table er"><tbody>'
-    +L('Ventas',t.ventas,'',nl+' venta'+(nl!==1?'s':'')+' nueva'+(nl!==1?'s':'')+(LV.T.m2?' · '+nf(LV.T.m2).replace(/\.00$/,'')+' m² · '+S(LV.T.m2con/LV.T.m2)+' por m²':'')+(LV.ant.n?' · '+S(LV.ant.s)+' completan la inicial de '+LV.ant.n+' venta'+(LV.ant.n!==1?'s':'')+' de meses anteriores':'')+(LV.sinLote>1?' · '+S(LV.sinLote)+' sin lote asignado':''))
+    +L('Ventas',t.ventas,'',nl+' venta'+(nl!==1?'s':'')+' ('+LV.Tc.n+' confirmada'+(LV.Tc.n!==1?'s':'')+') · '+S(LV.T.mes)+(LV.T.m2?' · '+nf(LV.T.m2).replace(/\.00$/,'')+' m²':'')+(LV.Ts.n||LV.Td.n?' · '+S(LV.Ts.s+LV.Td.s)+' de separaciones que aún no son venta o desistidas':'')+(LV.ant.n?' · '+S(LV.ant.s)+' completan la inicial de '+LV.ant.n+' venta'+(LV.ant.n!==1?'s':'')+' de meses anteriores':'')+(LV.sinLote>1?' · '+S(LV.sinLote)+' sin lote asignado':''))
     +(t.otrosIng?L('Otros ingresos',t.otrosIng,'','Reembolsos, intereses y otros que no son de clientes'):'')
     +(t.otros?L('Ingresos sin clasificar',t.otros,'','Clasifícalos en Movimientos (ventas o cobranza)'):'')
     +L('Ingresos del periodo',ing,'sum','La cobranza va abajo como referencia')
@@ -2320,7 +2452,7 @@ function estadoResultadosHtml(movs){
     +'<div class="cobref"><div class="cobref-h"><b>Cobranza del periodo</b><span>Referencia · no suma al resultado</span><b class="num">'+S(t.cob)+'</b></div>'
     +'<div class="cobref-r tot"><span>Total que entró de clientes al banco<em>ventas + cobranza'+(t.otrosIng?' + otros':'')+(t.otros?' + sin clasificar':'')+'</em></span><b>'+S(ingCli)+'</b></div></div>'
     +'<div class="cobref"><div class="cobref-h"><b>Aparte</b><span>No suma al resultado de la empresa</span></div>'
-    +'<div class="cobref-r"><span>Capitalización Dirección<em>'+(ingCli?(cap/ingCli*100).toFixed(1):'0')+'% de lo que entró de clientes · meta '+RECOM['DEUDA GG']+'%</em></span><b>'+S(cap)+'</b></div>'
+    +'<div class="cobref-r"><span>Capitalización Dirección (neta)<em>'+((t.ventas+t.cob)?((cap-t.devGG)/(t.ventas+t.cob)*100).toFixed(1):'0')+'% de ventas + cobranza · meta '+RECOM['DEUDA GG']+'%'+(t.devGG?' · pagado '+S(cap)+' − devuelto '+S(t.devGG):'')+'</em></span><b>'+S(cap-t.devGG)+'</b></div>'
     +(evo?'<div class="cobref-r"><span>Evolution<em>entidad aparte · su parte de los costos fijos</em></span><b>'+S(evo)+'</b></div>':'')
     +'<div class="cobref-r"><span>Financiamiento recibido<em>préstamos</em></span><b>'+S(t.fin)+'</b></div>'
     +((cm.n||cm.sinPar.length)?'<div class="cobref-r"><span>Cambio de moneda<em>'+(cm.usd?'compra de '+U(cm.usd)+' a TC '+cm.tc.toFixed(3)+' · ':'')+cm.n+' cambio'+(cm.n!==1?'s':'')+(cm.sinPar.length?' · '+cm.sinPar.length+' sin pareja':'')+' · no es gasto</em></span><b>'+S(cm.soles+cm.sinPar.reduce(function(a,m){return a+(m.moneda==='PEN'&&m.cargo>0?m.cargo:0);},0))+'</b></div>':'')
@@ -2328,25 +2460,50 @@ function estadoResultadosHtml(movs){
     +'</div>'
     +'<p class="nota">Ventas y cobranza salen de cómo está clasificado cada ingreso en el banco. El precio por m² es lo que entró en el periodo entre los m² del lote. Capitalización Dirección y Evolution van aparte. Los costos fijos ya van repartidos por área.</p></div>';
 }
-// Distribución de lo que entró de clientes: 50% capitalización y 50% áreas, con el % recomendado de cada área
+// Plata que vuelve de Dirección (Bayas y Frutos / Grupo Inmobiliario) clasificada como financiamiento: se descuenta de la capitalización
+function esDevolucionGG(m){return m.abono>0&&m.clas==='FINANCIAMIENTO'&&(m.area==='DEUDA GG'||/BAYAS Y FRUTOS|GRUPO INMOBILIARIO ROBLES|INMUEBLES ROBLES/.test(cNorm(m.desc)));}
+// Flujo del periodo para la distribución: base = ventas + cobranza; capitalización neta; cierre con la caja del banco
+function flujoDist(movs){
+  var cm=cambiosMoneda(periodoConc()),f={V:0,C:0,otI:0,devGG:0,fin:0,egTot:0,cm:cm};
+  movs.forEach(function(m){if(cm.set[m.sig])return;
+    if(m.abono>0){var s=solesDe(m);if(m.clas==='VENTAS')f.V+=s;else if(m.clas==='COBRANZA')f.C+=s;else if(esDevolucionGG(m))f.devGG+=s;else if(m.clas==='FINANCIAMIENTO')f.fin+=s;else f.otI+=s;}
+    if(m.cargo>0)f.egTot+=m.moneda==='USD'?m.cargo*(cm.tc||tcDe(m)):m.cargo;});
+  var A=areasConTC(movs,cm);f.A=A;f.base=f.V+f.C;f.capB=A['DEUDA GG'].eq;f.capN=f.capB-f.devGG;
+  f.areas=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'];f.gA=f.areas.reduce(function(a,k){return a+A[k].eq;},0);
+  f.ot=f.egTot-f.capB-f.gA;f.res=f.base-f.capN-f.gA-f.ot;f.caja=f.res+f.fin+f.otI;
+  // Lo que dice el banco (soles + dólares al TC del mes)
+  var y=CV.ym,y1=y.length===4?(Object.keys(DB.saldos).filter(function(k){return k.slice(0,4)===y;}).sort().pop()||''):y,y0=y.length===4?(y-1)+'-12':ymPrev(y);
+  var s0=DB.saldos[y0],s1=DB.saldos[y1];
+  var tcB=getTC(y1||(movs.length?ym(movs[0].fecha):'2026-01'));
+  if(s0&&s1&&s0.soles!=null&&s1.soles!=null){f.banco=(s1.soles-s0.soles)+((+s1.dolares||0)-(+s0.dolares||0))*tcB;f.s0=s0;f.s1=s1;}
+  // Caja real: todo lo que entró menos todo lo que salió (incluye los cambios de moneda), dólares al mismo TC que el saldo del banco
+  var cajaT=0;movs.forEach(function(m){cajaT+=((m.abono||0)-(m.cargo||0))*(m.moneda==='USD'?tcB:1);});
+  f.dtc=cajaT-f.caja;f.caja=cajaT;
+  return f;}
+// Distribución de lo que entró de clientes: 50% capitalización (neta) y 50% áreas; cierra con la variación de caja del banco
 function distribucionHtml(movs){
-  var cm=cambiosMoneda(periodoConc()),ingCli=0;movs.forEach(function(m){if(m.abono>0&&!cm.set[m.sig]&&m.clas!=='FINANCIAMIENTO')ingCli+=solesDe(m);});
-  var A=areasConTC(movs,cm),ot=A['BANCO'].eq+A['DVO'].eq+A['OTROS'].eq,usado=0;
-  function fila(nom,v,rec,cls){var pct=ingCli?v/ingCli*100:0;usado+=v;var st=rec==null?'':pct>rec+0.05?'<span class="pill ex">+'+(pct-rec).toFixed(1)+' pts</span>':'<span class="pill ok">'+ico('check')+'</span>';
-    return '<tr class="'+(cls||'')+'"><td>'+nom+'</td><td class="num">'+S(v)+'</td><td class="num"><b>'+pct.toFixed(1)+'%</b></td><td class="num muted">'+(rec==null?'—':rec+'%')+'</td><td class="num">'+st+'</td></tr>';}
-  var areas=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],recA=areas.reduce(function(a,k){return a+RECOM[k];},0),gA=areas.reduce(function(a,k){return a+A[k].eq;},0);
-  var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución del ingreso</h2><div class="card-sub">De '+S(ingCli)+' que entraron de clientes (ventas + cobranza) · % recomendado de Movimientos</div></div></div>'
-    +'<div class="tablewrap"><table class="table er dist"><thead><tr><th></th><th class="num">Gastado</th><th class="num">% del ingreso</th><th class="num">Recom.</th><th></th></tr></thead><tbody>'
-    +fila('Capitalización Dirección',A['DEUDA GG'].eq,RECOM['DEUDA GG'],'sum');
-  var u0=usado;
-  h+=areas.map(function(k){return fila(esc(areaLabel(k)),A[k].eq,RECOM[k],'ind');}).join('');
-  usado=u0+gA;
-  var pg=ingCli?gA/ingCli*100:0;
-  h+='<tr class="sum"><td>Áreas</td><td class="num">'+S(gA)+'</td><td class="num"><b>'+pg.toFixed(1)+'%</b></td><td class="num muted">'+recA+'%</td><td class="num">'+(pg>recA+0.05?'<span class="pill ex">+'+(pg-recA).toFixed(1)+' pts</span>':'<span class="pill ok">'+ico('check')+'</span>')+'</td></tr>'
-    +fila('Banco, cambio y otros',ot,null,'ind')
-    +'<tr class="tot"><td>Queda sin usar</td><td class="num">'+S(ingCli-usado)+'</td><td class="num"><b>'+(ingCli?((ingCli-usado)/ingCli*100).toFixed(1):'0')+'%</b></td><td></td><td></td></tr>'
-    +'</tbody></table></div><p class="nota">Lo que entra de clientes se reparte 50% a capitalización y 50% a las áreas. Una etiqueta roja indica que el área gastó más de su % recomendado.</p></div>';
-  return h;
+  var f=flujoDist(movs),b=f.base;
+  function pc(v){return b?(v/b*100).toFixed(1)+'%':'—';}
+  function st(v,rec){if(rec==null||!b)return '';var p=v/b*100;return p>rec+0.05?'<span class="pill ex">+'+(p-rec).toFixed(1)+' pts</span>':'<span class="pill ok">'+ico('check')+'</span>';}
+  function fila(nom,v,rec,cls,sub,signo){return '<tr class="'+(cls||'')+'"><td>'+nom+(sub?'<div class="sub">'+sub+'</div>':'')+'</td><td class="num">'+(signo==='-'?'('+S(v)+')':S(v))+'</td><td class="num">'+(signo==='+'?'':'<b>'+pc(v)+'</b>')+'</td><td class="num muted">'+(rec==null?'':rec+'%')+'</td><td class="num">'+st(v,rec)+'</td></tr>';}
+  var recA=f.areas.reduce(function(a,k){return a+RECOM[k];},0);
+  var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución del ingreso</h2><div class="card-sub">Base: lo que entró de clientes (ventas + cobranza) · cierra con la caja del banco</div></div></div>'
+    +'<div class="tablewrap"><table class="table er dist"><thead><tr><th></th><th class="num">S/</th><th class="num">%</th><th class="num">Recom.</th><th></th></tr></thead><tbody>'
+    +fila('Entró de clientes',b,null,'sum','ventas '+S(f.V)+' · cobranza '+S(f.C))
+    +fila('Capitalización Dirección',f.capN,RECOM['DEUDA GG'],'',f.devGG?'pagado '+S(f.capB)+' − devuelto '+S(f.devGG):'','-')
+    +fila('Áreas',f.gA,recA,'','<span>'+f.areas.filter(function(k){return f.A[k].eq;}).map(function(k){var p=b?f.A[k].eq/b*100:0,ex=p>RECOM[k]+0.05;return esc(areaLabel(k))+' '+p.toFixed(1)+'%'+(ex?' <b class="neg">▲'+RECOM[k]+'%</b>':'');}).join(' · ')+'</span>','-')
+    +(Math.abs(f.ot)>0.5?fila('Banco, Evolution y otros',f.ot,null,'','','-'):'')
+    +fila('Resultado con clientes',f.res,null,'sum','','')
+    +(f.fin?fila('+ Financiamiento recibido',f.fin,null,'','préstamos y socios','+'):'')
+    +(f.otI?fila('+ Otros ingresos',f.otI,null,'','reembolsos, intereses o sin clasificar','+'):'')
+    +(Math.abs(f.dtc)>0.5?'<tr><td>'+(f.dtc<0?'− ':'+ ')+'Cambio de moneda<div class="sub">compra/venta de dólares y tipo de cambio</div></td><td class="num">'+(f.dtc<0?'('+S(-f.dtc)+')':S(f.dtc))+'</td><td></td><td></td><td></td></tr>':'')
+    +'<tr class="tot"><td>Variación de caja</td><td class="num">'+(f.caja<0?'('+S(-f.caja)+')':S(f.caja))+'</td><td></td><td></td><td></td></tr>'
+    +'</tbody></table></div>';
+  if(f.banco!=null){var d=f.caja-f.banco;
+    h+='<p class="nota" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+(Math.abs(d)<1?'<span class="pill ok">'+ico('check')+' Cuadra con el banco</span>':'<span class="pill warn">Diferencia '+S(Math.abs(d))+'</span>')
+      +'<span>Banco: saldo de '+S(f.s0.soles)+(+f.s0.dolares?' + '+U(+f.s0.dolares):'')+' a '+S(f.s1.soles)+(+f.s1.dolares?' + '+U(+f.s1.dolares):'')+' = '+(f.banco<0?'baja ':'sube ')+S(Math.abs(f.banco))+'</span>'
+      +(Math.abs(d)>=1?'<span class="muted">(falta cargar o corregir algún movimiento del periodo)</span>':'')+'</p>';}
+  return h+'<p class="nota">Capitalización y áreas se miden contra lo que entró de clientes (meta 50% y 50%). La capitalización es neta: lo pagado a Dirección menos lo que Bayas y Frutos o Grupo Inmobiliario devolvieron. ▲ = el área pasó su % recomendado.</p></div>';
 }
 // Sección que se abre y se cierra; recuerda si quedó abierta
 function plegable(id,titulo,resumen,cuerpo){return '<details class="card concsteps plegable" data-sec="'+id+'"'+(CV.sec&&CV.sec[id]?' open':'')+'><summary><span class="card-title" style="font-size:16px">'+titulo+'</span><span class="muted" style="font-size:12.5px">'+resumen+'</span>'+ico('caret-down')+'</summary><div class="plg-in">'+cuerpo+'</div></details>';}
