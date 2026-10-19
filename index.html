@@ -91,6 +91,7 @@ button{cursor:pointer}
 .avatar{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
 .sb-user .mail{color:#fff;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sb-user .rol{color:rgba(255,255,255,.62);font-size:11.5px}
+.sb-drive{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.72);font-size:13px;text-decoration:none}.sb-drive:hover{color:#fff}.mdrive{display:flex;align-items:center;gap:8px;padding:10px 4px;font-size:14px;color:inherit;text-decoration:none}
 .sb-user button{display:flex;align-items:center;gap:8px;border:0;background:none;color:rgba(255,255,255,.72);font-size:13px;padding:0}
 .sb-user button:hover{color:#fff}
 .main{margin-left:236px;min-width:0;display:flex;flex-direction:column;min-height:100vh}
@@ -661,6 +662,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
     <nav class="sb-nav" id="sbNav"></nav>
     <div class="sb-user">
       <div class="u"><div class="avatar" id="uAvatar">·</div><div style="display:flex;flex-direction:column;min-width:0"><span class="mail" id="uMail"></span><span class="rol" id="uRol"></span></div></div>
+      <a id="driveLink" class="sb-drive" href="#" target="_blank" rel="noopener" hidden><i class="ph ph-google-drive-logo"></i>Historial y respaldo en Drive</a>
       <button id="salir"><i class="ph ph-sign-out"></i>Salir</button>
     </div>
   </aside>
@@ -757,6 +759,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
       <button data-v="conc"><i class="ph ph-scales"></i>Conciliación</button>
       <button data-v="lotes"><i class="ph ph-map-trifold"></i>Lotes</button>
     </div>
+    <a id="driveLinkM" class="mdrive" href="#" target="_blank" rel="noopener" hidden><i class="ph ph-google-drive-logo"></i>Historial y respaldo en Drive</a>
     <div class="usr"><div class="avatar" id="mAvatar">·</div><div class="t"><b id="mMail"></b><span id="mRolTxt"></span></div><button class="btn btn-secondary btn-sm" id="salirM">Salir</button></div>
   </div>
   <div class="sheet-bg" id="panelBg"></div>
@@ -2944,6 +2947,7 @@ async function iniciar(){
   ROL=(perf.data&&perf.data.rol)?perf.data.rol:'viewer';
   $('login').style.display='none';$('app').style.display='block';
   aplicarRol();
+  sb.rpc('drive_link').then(function(r){var u=r&&r.data;if(u){['driveLink','driveLinkM'].forEach(function(id){var a=$(id);a.href=u;a.hidden=false;});}});
   try{await cargarNube();}catch(e){setSync('error al cargar');}
   buildFilters();
   irA('mes');
