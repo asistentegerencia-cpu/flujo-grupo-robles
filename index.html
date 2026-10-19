@@ -896,33 +896,28 @@ function rowToMov(r){return {sig:r.sig,fecha:r.fecha,mov:r.mov||'',desc:r.descri
 function movToRow(m){var row={sig:sigOf(m),fecha:m.fecha,mov:m.mov,descripcion:m.desc,numero_operacion:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldo_cont:(m.saldoCont===''||m.saldoCont==null)?null:m.saldoCont,tc:m.tc,area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)row.reparto=m.reparto||'';if(HAS_CAMBIO){row.cambio_area=m.cambioArea||null;row.cambio_grupo=m.cambioGrupo||null;}if(HAS_ETAPA)row.etapa=m.etapa||null;if(HAS_LREP)row.lotes_rep=m.repLotes||null;if(HAS_DEV)row.devolucion_de=m.devDe||null;if(HAS_PREF)row.periodo_ref=m.periodoRef||null;return row;}
 async function cargarNube(){
   setSync('cargando…');
-  DB.movs={}; var desde=0, tam=1000, total=0;
-  for(;;){
-    var q=await sb.from('movimientos').select('*').order('fecha',{ascending:false}).range(desde,desde+tam-1);
-    if(q.error) throw q.error;
-    var rows=q.data||[];
-    rows.forEach(function(r){DB.movs[r.sig]=rowToMov(r);total++;});
-    if(rows.length<tam) break;
-    desde+=tam;
-  }
-  var t1=await sb.from('movimientos').select('reparto').limit(1); HAS_REPARTO=!t1.error;
-  var t3=await sb.from('movimientos').select('cambio_grupo').limit(1); HAS_CAMBIO=!t3.error;
-  var t4=await sb.from('movimientos').select('etapa').limit(1); HAS_ETAPA=!t4.error;
-  var t5=await sb.from('movimientos').select('lotes_rep').limit(1); HAS_LREP=!t5.error;
-  var t6=await sb.from('movimientos').select('devolucion_de').limit(1); HAS_DEV=!t6.error;
-  var t7=await sb.from('movimientos').select('periodo_ref').limit(1); HAS_PREF=!t7.error;
-  var t2=await sb.from('saldos').select('tc').limit(1); HAS_TC=!t2.error;
-  var sl=await sb.from('saldos').select('*');
+  DB.movs={}; var tam=1000, total=0;
+  // Todo se pide a la vez (antes era una consulta tras otra): primero cuántos movimientos hay, luego todas las páginas y las demás tablas juntas
+  if(!LT.stock&&!LT.cargando)ltCargar().then(function(){if(VISTA==='conc'||VISTA==='ventas'||VISTA==='consol'||VISTA==='lotes')renderActual();});
+  var cnt=await sb.from('movimientos').select('sig',{count:'exact',head:true});
+  if(cnt.error) throw cnt.error;
+  var pags=Math.max(1,Math.ceil((cnt.count||0)/tam)),pq=[];
+  for(var i=0;i<pags;i++)pq.push(sb.from('movimientos').select('*').order('fecha',{ascending:false}).order('sig').range(i*tam,i*tam+tam-1));
+  var R=await Promise.all([Promise.all(pq),sb.from('saldos').select('*'),cargarBases(),cargarAsesores(),cargarMetas(),cargarMetasPersonal(),cargarVentasJuntas(),cargarVentasConf()]);
+  var r0=null;
+  R[0].forEach(function(q){if(q.error)throw q.error;(q.data||[]).forEach(function(r){if(!r0)r0=r;DB.movs[r.sig]=rowToMov(r);});});
+  // Si entraron movimientos mientras se cargaba, trae lo que falte
+  var desde=pags*tam;if(Object.keys(DB.movs).length>=desde){for(;;){var q=await sb.from('movimientos').select('*').order('fecha',{ascending:false}).order('sig').range(desde,desde+tam-1);if(q.error)throw q.error;(q.data||[]).forEach(function(r){DB.movs[r.sig]=rowToMov(r);});if((q.data||[]).length<tam)break;desde+=tam;}}
+  total=Object.keys(DB.movs).length;
+  // Columnas nuevas: se ven en la primera fila (antes se probaba cada una con una consulta)
+  if(r0){HAS_REPARTO='reparto' in r0;HAS_CAMBIO='cambio_grupo' in r0;HAS_ETAPA='etapa' in r0;HAS_LREP='lotes_rep' in r0;HAS_DEV='devolucion_de' in r0;HAS_PREF='periodo_ref' in r0;}
+  else{var T=await Promise.all(['reparto','cambio_grupo','etapa','lotes_rep','devolucion_de','periodo_ref'].map(function(c){return sb.from('movimientos').select(c).limit(1);}));
+    HAS_REPARTO=!T[0].error;HAS_CAMBIO=!T[1].error;HAS_ETAPA=!T[2].error;HAS_LREP=!T[3].error;HAS_DEV=!T[4].error;HAS_PREF=!T[5].error;}
+  var sl=R[1];
   if(sl.error) throw sl.error;
+  HAS_TC=(sl.data&&sl.data.length)?('tc' in sl.data[0]):!(await sb.from('saldos').select('tc').limit(1)).error;
   DB.saldos={}; (sl.data||[]).forEach(function(r){DB.saldos[r.ym]={soles:r.soles!=null?+r.soles:null,dolares:r.dolares!=null?+r.dolares:null,tc:r.tc!=null?+r.tc:null};});
-  await cargarBases();
-  await cargarAsesores();
-  await cargarMetas();
-  await cargarMetasPersonal();
   if(typeof cargarConc==='function')await cargarConc();
-  await cargarVentasJuntas();
-  await cargarVentasConf();
-  if(!LT.stock&&!LT.cargando)ltCargar().then(function(){if(VISTA==='conc'||VISTA==='ventas'||VISTA==='consol')renderActual();});
   setSync('sincronizado ✓ ('+total+' movs)');
 }
 async function cargarMetas(){
@@ -2194,7 +2189,10 @@ async function confirmarVenta(k,si){
   await registrarCambio('ventas_confirmadas',g.k,si?'confirmar':'quitar_confirmacion',null,{claves:cs,ym:(g.fechaVenta||'').slice(0,7)});
   setSync('guardado ✓');renderActual();}
 // Todas las ventas (agrupadas por contrato/lote/cliente) con su estado y fecha de venta
-function infoVentas(){
+// Se calcula una sola vez mientras se arma la pantalla (antes se repetía por cada mes y cada tarjeta)
+var _MEMO=null;function memo(k,fn){if(!_MEMO){_MEMO={};setTimeout(function(){_MEMO=null;},0);}if(!(k in _MEMO))_MEMO[k]=fn();return _MEMO[k];}
+function infoVentas(){var G=memo('iv',infoVentas0),o={};Object.keys(G).forEach(function(k){o[k]=Object.assign({},G[k]);});return o;}
+function infoVentas0(){
   var G={};
   allMovs().forEach(function(m){if(!esVentaCob(m))return;partesMov(m).forEach(function(p){var k=ventaKey(p);if(!k)return;
     var g=G[k]=G[k]||{k:k,parts:[],ms:[],bases:[],cli:'',primer:'',sep:'',fv:'',desist:false,cob:false};
@@ -2217,7 +2215,8 @@ function infoVentas(){
     g.lote=lotesTexto(g.parts);if(!g.cli&&c)g.cli=c.titular;g.manual=esJuntaManual(k);g.m2=m2DeGrupo(g.parts)||null;g.conf=g.estado==='venta'&&ventaConfirmada(g);});
   return G;}
 // Ventas del periodo: del periodo (fecha de venta en el periodo), separaciones, desistidas y pagos de ventas de meses anteriores
-function lotesVentas(movs){
+function lotesVentas(movs){return memo('lv|'+CV.ym+'|'+movs.length,function(){return lotesVentas0(movs);});}
+function lotesVentas0(movs){
   var enP=periodoConc(),ini=CV.ym.length===4?CV.ym+'-01-01':CV.ym+'-01',fin=CV.ym.length===4?CV.ym+'-12-31':CV.ym+'-31',G=infoVentas(),mes={},dep={},msP={},sinLote={s:0,ms:[]};
   movs.forEach(function(m){if(!(m.abono>0)||m.clas!=='VENTAS'||!enP(m.fecha))return;partesMov(m).forEach(function(pt){var k=ventaKey(pt);
     if(!k){sinLote.s+=pt.s;sinLote.ms.push(m);return;}mes[k]=(mes[k]||0)+pt.s;dep[k]=(dep[k]||0)+1;(msP[k]=msP[k]||[]);if(msP[k].indexOf(m)===-1)msP[k].push(m);});});
@@ -2368,7 +2367,8 @@ function abrirIngresoConc(sig){
     m.clas=$('ciClas').value;if(leerIngresoCampos(m,'ci')===false){this.disabled=false;return;}
     await updateMov(m);cerrar();renderActual();};
 }
-function verEnMovimientos(sig){var m=DB.movs[sig];if(!m)return;irA('mes');$('fDesde').value='';$('fHasta').value='';$('fMes').value=ym(m.fecha);FILTER='all';SEARCH='';SEL=sig;renderActual();abrirPanelMovil();
+// Abre el movimiento en Movimientos dibujando la pantalla una sola vez (antes se dibujaba dos veces)
+function verEnMovimientos(sig){var m=DB.movs[sig];if(!m)return;$('fDesde').value='';$('fHasta').value='';$('fMes').value=ym(m.fecha);FILTER='all';SEARCH='';irA('mes');SEL=sig;renderDetLista();abrirPanelMovil();
   setTimeout(function(){var r=document.querySelector('#detInner [data-sig="'+encodeURIComponent(sig)+'"]');if(r)r.scrollIntoView({block:'center'});},50);}
 
 // ============ Pantalla ============
@@ -2574,7 +2574,7 @@ function ltEstado(x){var e=cNorm(x&&x.estado).trim();return x?(LT_EST[e]?e:'MINU
 async function ltCargar(){
   if(LT.cargando)return;LT.cargando=true;LT.error='';
   try{
-    var st=await ltTodo('evolta_stock'),ct=await ltTodo('evolta_contratos');
+    var both=await Promise.all([ltTodo('evolta_stock'),ltTodo('evolta_contratos')]),st=both[0],ct=both[1];
     LT.stock=st.map(function(x){return {etapa:ltEtapa(x.etapa),lote:x.lote,m2:x.m2!=null?+x.m2:null,precio:x.precio!=null?+x.precio:null,moneda:x.moneda||'PEN',estado:x.estado||''};});
     LT.contratos=ct.map(function(c){['precio','pagado','saldo','ci_total','ci_cobrada','sf_total','sf_cobrada'].forEach(function(k){c[k]=c[k]!=null?+c[k]:null;});c.etapaN=ltEtapa(c.etapa);return c;});
   }catch(e){LT.error=e.message||String(e);}
