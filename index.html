@@ -65,7 +65,7 @@ button{cursor:pointer}
 .field input{height:44px;padding:0 14px;border:1px solid var(--gr-border);border-radius:var(--r-md);background:var(--gr-surface-2);font-size:14px;color:var(--gr-text);outline:none}
 .field input:focus{border-color:var(--gr-action);background:#fff}
 .lolvido{border:0;background:none;color:var(--gr-brand);font-size:12.5px;font-weight:600;cursor:pointer;padding:2px 0;text-align:left}
-.lmsg{display:none;padding:10px 12px;border-radius:var(--r-md);background:var(--gr-pos-bg);color:var(--gr-pos-ink);font-size:13px}
+.lmsg{display:none;padding:10px 12px;border-radius:var(--r-md);background:var(--gr-pos-bg);color:var(--gr-pos-ink);font-size:13px}.lmsg.mal{background:var(--gr-neg-bg,#fdecec);color:var(--gr-neg-ink,#a32020)}
 .loginerr{display:none;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:var(--r-md);background:var(--gr-neg-bg);color:var(--gr-neg-ink);font-size:13px}
 .loginerr .ph{font-size:18px}
 #lbtn,#pwbtn{height:46px;border:0;border-radius:var(--r-md);background:var(--gr-brand);color:#fff;font-size:15px;font-weight:700}
@@ -2923,11 +2923,16 @@ function exportar(scope){
 
 // ============ Auth ============
 function showLogin(){$('login').style.display='flex';$('app').style.display='none';}
+// Nombre y cargo de cada cuenta (para mostrar quién está conectado)
+var PERSONAS={'asistente.gerencia@paradiseinmuebles.com':['Italo Torres','Asistente de Gerencia'],
+  'administracion@paradiseinmuebles.com':['Barbara Cueva','Administradora'],
+  'asistenteadministrativo@paradiseinmuebles.com':['Ana Coz','Cobranzas Pachamama'],
+  'gruporoblesperu.gestion2@gmail.com':['Rosario y Maricielo','Gestión Adm. y Auditoría']};
 function aplicarRol(){
   READONLY=(ROL!=='editor');
-  var mail=USUARIO?USUARIO.email:'',ini=(mail.charAt(0)||'·').toUpperCase(),rol=READONLY?'Solo ver':'Editor';
-  $('uMail').textContent=mail;$('uRol').textContent=rol;$('uAvatar').textContent=ini;
-  $('mMail').textContent=mail;$('mRolTxt').textContent=rol;$('mAvatar').textContent=ini;
+  var mail=USUARIO?USUARIO.email:'',per=PERSONAS[(mail||'').toLowerCase()],nom=per?per[0]:mail,ini=(nom.charAt(0)||'·').toUpperCase(),rol=READONLY?'Solo ver':'Editor',cargo=(per?per[1]+' · ':'')+rol;
+  $('uMail').textContent=nom;$('uMail').title=mail;$('uRol').textContent=cargo;$('uAvatar').textContent=ini;
+  $('mMail').textContent=nom;$('mRolTxt').textContent=cargo;$('mAvatar').textContent=ini;
   $('rolBadge').textContent=rol;$('rolBadge').className='rolbadge'+(READONLY?' viewer':'');
   $('mRol').textContent=' · '+rol;
   buildNav();
@@ -2971,7 +2976,8 @@ async function guardarClave(){var a=$('pw1').value,b=$('pw2').value,e=$('pwerr')
 async function olvide(){var email=$('lemail').value.trim(),m=$('lmsg');$('lerr').style.display='none';
   if(!email){m.style.display='block';m.textContent='Escribe tu correo arriba y vuelve a tocar «¿Olvidaste tu contraseña?».';$('lemail').focus();return;}
   var r=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname});
-  m.style.display='block';m.textContent=r.error?('No se pudo enviar: '+r.error.message):('Si '+email+' tiene cuenta, le llegará un correo para crear su contraseña. Revisa también la carpeta de spam.');}
+  m.style.display='block';m.className='lmsg'+(r.error?' mal':'');
+  m.textContent=r.error?(/rate limit/i.test(r.error.message)?'Ya se enviaron muchos correos en la última hora. Espera unos 30–60 minutos y vuelve a tocar «¿Olvidaste tu contraseña?» una sola vez.':'No se pudo enviar: '+r.error.message):('Si '+email+' tiene cuenta, le llegará un correo para crear su contraseña. Revisa también la carpeta de spam.');}
 
 // ============ Eventos ============
 BRAND_ROBLES=$('brandImg').src;BRAND_PACHA=$('pachaBrandSrc').src;
