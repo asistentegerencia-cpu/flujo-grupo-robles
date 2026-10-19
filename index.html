@@ -91,7 +91,7 @@ button{cursor:pointer}
 .avatar{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
 .sb-user .mail{color:#fff;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sb-user .rol{color:rgba(255,255,255,.62);font-size:11.5px}
-.sb-drive{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.72);font-size:13px;text-decoration:none}.sb-drive:hover{color:#fff}.mdrive{display:flex;align-items:center;gap:8px;padding:10px 4px;font-size:14px;color:inherit;text-decoration:none}
+.sb-drive[hidden],.mdrive[hidden]{display:none!important}.sb-drive{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.72);font-size:13px;text-decoration:none}.sb-drive:hover{color:#fff}.mdrive{display:flex;align-items:center;gap:8px;padding:10px 4px;font-size:14px;color:inherit;text-decoration:none}
 .sb-user button{display:flex;align-items:center;gap:8px;border:0;background:none;color:rgba(255,255,255,.72);font-size:13px;padding:0}
 .sb-user button:hover{color:#fff}
 .main{margin-left:236px;min-width:0;display:flex;flex-direction:column;min-height:100vh}
@@ -293,6 +293,7 @@ select.input-ghost{appearance:auto}
 .alert.neg{background:var(--gr-neg-bg);color:var(--gr-neg-ink)}
 .alert.warn{background:var(--gr-warn-bg);color:var(--gr-warn-ink)}
 .alert.pos{background:var(--gr-pos-bg);color:var(--gr-pos-ink)}
+.alert.brand{background:var(--gr-brand-50);color:var(--gr-brand)}.botpill{margin-right:6px;font-size:10.5px;padding:2px 7px;vertical-align:middle}.botpill .ph{font-size:12px}
 .pfield{display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;color:var(--gr-text-2)}
 .pfield select,.pfield input,.pfield textarea{height:40px;padding:0 12px;border:1px solid var(--gr-border);border-radius:var(--r-md);background:var(--gr-surface);font-size:13.5px;font-weight:600;color:var(--gr-text)}
 .pfield textarea{height:64px;padding:10px 12px;font-weight:500;resize:vertical}
@@ -773,7 +774,7 @@ var LINK_TIPO=((location.hash||'').match(/type=(invite|recovery)/)||[])[1]||'',L
 var sb=supabase.createClient(SB_URL,SB_KEY);
 var DB={movs:{},saldos:{},asesores:[],metas:{},metasPersonal:{}}, ROL='viewer', USUARIO=null, READONLY=true;
 // columnas nuevas (se detectan al cargar, para no romper si aún no existen en la BD)
-var HAS_REPARTO=false, HAS_TC=false, HAS_CAMBIO=false, HAS_ETAPA=false, HAS_LREP=false, HAS_DEV=false, HAS_PREF=false;
+var HAS_REPARTO=false, HAS_TC=false, HAS_CAMBIO=false, HAS_ETAPA=false, HAS_LREP=false, HAS_DEV=false, HAS_PREF=false, HAS_BOT=false;
 
 // ============ Config ============
 var TC={1:3.47,2:3.47,3:3.47,4:3.45,5:3.42,6:3.40,7:3.42,8:3.47,9:3.47,10:3.47,11:3.47,12:3.47};
@@ -887,6 +888,24 @@ function repartir(m,monto,fn){
 }
 function repartoTxt(m){var G=gruposDe(ym(m.fecha)),l=gruposReparto(m);return l.length===G.length?'Todas ('+l.length+')':l.map(function(g){return g.l;}).join(', ');}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+// ============ Bot clasificador ============
+// Aprende de cómo se clasificaron antes los movimientos parecidos (misma descripción del banco, mismo tipo).
+// Solo aprende de lo confirmado por personas: lo que puso el bot y nadie revisó no cuenta.
+function botKey(m){return (esIngreso(m)?'I|':'E|')+((m.mov||'')+' '+(m.desc||'')).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[0-9]+/g,'#').replace(/[^A-Z# ]+/g,' ').replace(/\s+/g,' ').trim();}
+function botTup(m){return esIngreso(m)?m.area+'|'+(m.clas||''):[m.area,m.concepto||'',m.personal||'',m.esFijo?1:0].join('|');}
+function botIndex(){return memo('bot',function(){var ix={};allMovs().forEach(function(m){if(m.area==='REVISAR'||m.bot==='auto'||(esIngreso(m)&&!m.clas))return;var k=botKey(m);(ix[k]=ix[k]||[]).push(m);});
+  Object.keys(ix).forEach(function(k){ix[k].sort(function(a,b){return a.fecha<b.fecha?1:a.fecha>b.fecha?-1:0;});});return ix;});}
+// alta (se aplica solo) = egreso con descripción clara, al menos 2 parecidos y los 3 últimos clasificados igual: acierta 97% con los datos reales.
+// En ingresos solo sugiere: la descripción no basta para saber si es venta o cobranza.
+function botSugerir(m){var me=sigOf(m),l=(botIndex()[botKey(m)]||[]).filter(function(p){return sigOf(p)!==me;});if(!l.length)return null;
+  var u=l.slice(0,3),t0=botTup(u[0]),letras=botKey(m).replace(/[^A-Z]/g,'').length-1,alta=!esIngreso(m)&&letras>=6&&l.length>=2&&u.every(function(p){return botTup(p)===t0;});
+  var cnt={};l.slice(0,6).forEach(function(p){var t=botTup(p);cnt[t]=(cnt[t]||0)+1;});
+  var best=alta?t0:Object.keys(cnt).sort(function(a,b){return cnt[b]-cnt[a];})[0];
+  return {alta:alta,ej:l.filter(function(p){return botTup(p)===best;})[0],n:l.length,iguales:cnt[best]||0,de:Math.min(l.length,6)};}
+function botAplicar(m,ej){m.area=ej.area;
+  if(esIngreso(m)){m.clas=ej.clas||'';}
+  else{m.concepto=ej.concepto||'';m.personal=ej.personal||'';m.esFijo=!!ej.esFijo;m.reparto=ej.esFijo?(ej.reparto||''):'';m.proyecto=ej.proyecto||'';}}
+function botTxt(ej){return esIngreso(ej)?(ej.clas?clasLabel(ej.clas):'Ingreso'):(ej.esFijo?'Costo fijo':areaLabel(ej.area))+(ej.concepto?' · '+ej.concepto:'')+(ej.personal?' · '+ej.personal:'');}
 function clasificar(mov,desc,abono){var h=(mov+' '+desc).toUpperCase();for(var i=0;i<REGLAS.length;i++)if(h.indexOf(REGLAS[i][0])!==-1)return REGLAS[i][1];return (abono&&abono>0)?'INGRESO':'REVISAR';}
 
 // ============ Utils ============
@@ -910,8 +929,8 @@ function sigOf(m){return m.sig||[m.fecha,m.mov,m.desc,m.cargo,m.abono,m.saldoCon
 function baseKey(m){return [m.fecha,m.mov,m.desc,m.cargo,m.abono,m.moneda].join('|');}
 
 // ============ Data layer (Supabase) ============
-function rowToMov(r){return {sig:r.sig,fecha:r.fecha,mov:r.mov||'',desc:r.descripcion||'',numOp:r.numero_operacion||'',moneda:r.moneda,cargo:+r.cargo||0,abono:+r.abono||0,saldoCont:r.saldo_cont!=null?+r.saldo_cont:'',tc:r.tc!=null?+r.tc:null,area:r.area,obs:r.obs||'',asesor:r.asesor||'',clas:r.clasificacion||'',cliente:r.cliente||'',lote:r.lote||'',m2:r.m2!=null?+r.m2:'',concepto:r.concepto||'',cuota:r.cuota||'',metodoPago:r.metodo_pago||'',personal:r.personal||'',esFijo:!!r.es_fijo,proyecto:r.proyecto||'',reparto:r.reparto||'',cambioArea:r.cambio_area||'',cambioGrupo:r.cambio_grupo||'',etapa:r.etapa||'',repLotes:Array.isArray(r.lotes_rep)&&r.lotes_rep.length?r.lotes_rep:null,devDe:r.devolucion_de||'',periodoRef:r.periodo_ref||''};}
-function movToRow(m){var row={sig:sigOf(m),fecha:m.fecha,mov:m.mov,descripcion:m.desc,numero_operacion:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldo_cont:(m.saldoCont===''||m.saldoCont==null)?null:m.saldoCont,tc:m.tc,area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)row.reparto=m.reparto||'';if(HAS_CAMBIO){row.cambio_area=m.cambioArea||null;row.cambio_grupo=m.cambioGrupo||null;}if(HAS_ETAPA)row.etapa=m.etapa||null;if(HAS_LREP)row.lotes_rep=m.repLotes||null;if(HAS_DEV)row.devolucion_de=m.devDe||null;if(HAS_PREF)row.periodo_ref=m.periodoRef||null;return row;}
+function rowToMov(r){return {sig:r.sig,fecha:r.fecha,mov:r.mov||'',desc:r.descripcion||'',numOp:r.numero_operacion||'',moneda:r.moneda,cargo:+r.cargo||0,abono:+r.abono||0,saldoCont:r.saldo_cont!=null?+r.saldo_cont:'',tc:r.tc!=null?+r.tc:null,area:r.area,obs:r.obs||'',asesor:r.asesor||'',clas:r.clasificacion||'',cliente:r.cliente||'',lote:r.lote||'',m2:r.m2!=null?+r.m2:'',concepto:r.concepto||'',cuota:r.cuota||'',metodoPago:r.metodo_pago||'',personal:r.personal||'',esFijo:!!r.es_fijo,proyecto:r.proyecto||'',reparto:r.reparto||'',cambioArea:r.cambio_area||'',cambioGrupo:r.cambio_grupo||'',etapa:r.etapa||'',repLotes:Array.isArray(r.lotes_rep)&&r.lotes_rep.length?r.lotes_rep:null,devDe:r.devolucion_de||'',periodoRef:r.periodo_ref||'',bot:r.bot||''};}
+function movToRow(m){var row={sig:sigOf(m),fecha:m.fecha,mov:m.mov,descripcion:m.desc,numero_operacion:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldo_cont:(m.saldoCont===''||m.saldoCont==null)?null:m.saldoCont,tc:m.tc,area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)row.reparto=m.reparto||'';if(HAS_CAMBIO){row.cambio_area=m.cambioArea||null;row.cambio_grupo=m.cambioGrupo||null;}if(HAS_ETAPA)row.etapa=m.etapa||null;if(HAS_LREP)row.lotes_rep=m.repLotes||null;if(HAS_DEV)row.devolucion_de=m.devDe||null;if(HAS_PREF)row.periodo_ref=m.periodoRef||null;if(HAS_BOT)row.bot=m.bot||null;return row;}
 async function cargarNube(){
   setSync('cargando…');
   DB.movs={}; var tam=1000, total=0;
@@ -928,7 +947,7 @@ async function cargarNube(){
   var desde=pags*tam;if(Object.keys(DB.movs).length>=desde){for(;;){var q=await sb.from('movimientos').select('*').order('fecha',{ascending:false}).order('sig').range(desde,desde+tam-1);if(q.error)throw q.error;(q.data||[]).forEach(function(r){DB.movs[r.sig]=rowToMov(r);});if((q.data||[]).length<tam)break;desde+=tam;}}
   total=Object.keys(DB.movs).length;
   // Columnas nuevas: se ven en la primera fila (antes se probaba cada una con una consulta)
-  if(r0){HAS_REPARTO='reparto' in r0;HAS_CAMBIO='cambio_grupo' in r0;HAS_ETAPA='etapa' in r0;HAS_LREP='lotes_rep' in r0;HAS_DEV='devolucion_de' in r0;HAS_PREF='periodo_ref' in r0;}
+  if(r0){HAS_REPARTO='reparto' in r0;HAS_CAMBIO='cambio_grupo' in r0;HAS_ETAPA='etapa' in r0;HAS_LREP='lotes_rep' in r0;HAS_DEV='devolucion_de' in r0;HAS_PREF='periodo_ref' in r0;HAS_BOT='bot' in r0;}
   else{var T=await Promise.all(['reparto','cambio_grupo','etapa','lotes_rep','devolucion_de','periodo_ref'].map(function(c){return sb.from('movimientos').select(c).limit(1);}));
     HAS_REPARTO=!T[0].error;HAS_CAMBIO=!T[1].error;HAS_ETAPA=!T[2].error;HAS_LREP=!T[3].error;HAS_DEV=!T[4].error;HAS_PREF=!T[5].error;}
   var sl=R[1];
@@ -965,7 +984,7 @@ async function guardarMetasPersonalBatch(ymStr,filas){
 }
 async function upsertMovs(list){ if(!list.length)return null; setSync('guardando…'); var r=await sb.from('movimientos').upsert(list.map(movToRow),{onConflict:'sig',ignoreDuplicates:true}); setSync(r.error?('error: '+r.error.message):'guardado ✓'); return r.error||null; }
 var obsTimers={};
-async function updateMov(m){ setSync('guardando…'); var patch={area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)patch.reparto=m.reparto||'';if(HAS_CAMBIO){patch.cambio_area=m.cambioArea||null;patch.cambio_grupo=m.cambioGrupo||null;}if(HAS_ETAPA)patch.etapa=m.etapa||null;if(HAS_LREP)patch.lotes_rep=m.repLotes||null;if(HAS_DEV)patch.devolucion_de=m.devDe||null;if(HAS_PREF)patch.periodo_ref=m.periodoRef||null;var r=await sb.from('movimientos').update(patch).eq('sig',sigOf(m)); setSync(r.error?('error: '+r.error.message):'guardado ✓'); if(r.error)alert('No se guardó el cambio: '+r.error.message+'\nRecarga la página para ver el dato real.'); }
+async function updateMov(m){ setSync('guardando…'); var patch={area:m.area,obs:m.obs||'',asesor:m.asesor||'',clasificacion:m.clas||'',cliente:m.cliente||'',lote:m.lote||'',m2:(m.m2===''||m.m2==null)?null:m.m2,concepto:m.concepto||'',cuota:m.cuota||'',metodo_pago:m.metodoPago||'',personal:m.personal||'',es_fijo:!!m.esFijo,proyecto:m.proyecto||''};if(HAS_REPARTO)patch.reparto=m.reparto||'';if(HAS_CAMBIO){patch.cambio_area=m.cambioArea||null;patch.cambio_grupo=m.cambioGrupo||null;}if(HAS_ETAPA)patch.etapa=m.etapa||null;if(HAS_LREP)patch.lotes_rep=m.repLotes||null;if(HAS_DEV)patch.devolucion_de=m.devDe||null;if(HAS_PREF)patch.periodo_ref=m.periodoRef||null;if(HAS_BOT)patch.bot=m.bot||null;var r=await sb.from('movimientos').update(patch).eq('sig',sigOf(m)); setSync(r.error?('error: '+r.error.message):'guardado ✓'); if(r.error)alert('No se guardó el cambio: '+r.error.message+'\nRecarga la página para ver el dato real.'); }
 function updateObsDebounced(sig){ clearTimeout(obsTimers[sig]); obsTimers[sig]=setTimeout(function(){ if(DB.movs[sig])updateMov(DB.movs[sig]); },700); }
 async function guardarTC(ymStr,v){
   if(!HAS_TC){alert('Falta agregar la columna tc en la tabla saldos (ver SQL de reparto y TC).');return;}
@@ -1296,6 +1315,7 @@ function procesar(){
   if(!all.length){showErr('No encontré movimientos en el archivo.');return;}
   var built=all.map(function(m){var tc=getTC(ym(m.fecha));
     return {fecha:m.fecha,mov:m.mov,desc:m.desc,numOp:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldoCont:m.saldoCont,tc:tc,area:(function(a){return a==='CAMBIO'&&m.abono>0?'INGRESO':a;})(clasificar(m.mov,m.desc,m.abono)),obs:'',asesor:'',clas:clasificar(m.mov,m.desc,m.abono)==='CAMBIO'&&m.abono>0?'CAMBIO':'',cliente:m.cliente||'',lote:'',m2:'',concepto:'',cuota:m.cuota||'',metodoPago:'',personal:'',esFijo:false,proyecto:''};});
+  built.forEach(function(b){var sg=botSugerir(b);if(sg&&sg.alta){botAplicar(b,sg.ej);b.bot='auto';}});
   // Un movimiento es NUEVO solo si su firma estable aparece mas veces en el archivo que las ya guardadas
   var have={};allMovs().forEach(function(m){var k=baseKey(m);have[k]=(have[k]||0)+1;});
   var used={};
@@ -1308,6 +1328,8 @@ function renderPreview(){
   var n=P.nuevos.length,nRev=P.nuevos.filter(function(m){return m.area==='REVISAR';}).length,sd=saldoDelArchivo(P);
   var lista=P.nuevos.slice().sort(function(a,b){return a.fecha<b.fecha?1:-1;});
   var h='<div class="card-head"><h2 class="card-title">Vista previa</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><span class="pill neutral">'+P.built.length+' leídos</span><span class="pill ok">'+n+' nuevos</span><span class="pill na">'+(P.built.length-n)+' ya guardados</span></div></div>';
+  var nBot=P.nuevos.filter(function(m){return m.bot==='auto';}).length;
+  if(nBot)h+='<div class="alert pos">'+ico('robot')+'<span>El bot clasificó solo <b>'+nBot+'</b> de '+n+' según cómo se clasificaron antes movimientos parecidos. Quedan marcados como <b>Bot</b> para que los revises.</span></div>';
   if(nRev)h+='<div class="alert warn">'+ico('warning')+'<span>'+nRev+(nRev===1?' movimiento no se pudo clasificar solo y quedará':' movimientos no se pudieron clasificar solos y quedarán')+' en REVISAR.</span></div>';
   if(n){h+='<div class="prevlist">'+lista.slice(0,6).map(function(m){return '<div class="prevrow"><span class="f">'+dmy(m.fecha)+'</span><span class="d">'+esc(m.desc||m.mov)+' <span>'+esc(m.mov)+'</span></span>'+montoHtml(m)+'</div>';}).join('')+'</div>'+(n>6?'<div class="muted3" style="font-size:12.5px;margin-bottom:10px">+ '+(n-6)+' más</div>':'');}
   else h+='<div class="alert pos" style="margin:10px 0">'+ico('check-circle')+'<span>No hay movimientos nuevos: todo ya estaba guardado.'+(sd&&sd.cambia?' El saldo del banco sí cambió y se puede guardar.':'')+'</span></div>';
@@ -1418,7 +1440,8 @@ function renderMes(){
 }
 function movTexto(m){return [dmy(m.fecha),m.mov,m.desc,m.moneda,String(monto(m)),fmtMon(m),esIngreso(m)?'ingreso':'egreso',areaLabel(m.area),esIngreso(m)?clasLabel(m.clas):'',m.asesor,m.personal,m.obs||'',m.esFijo?'fijo':'',!esIngreso(m)?(m.concepto||'')+(esAtrasado(m)?' atrasado':''):''].join(' ').toLowerCase();}
 function cambioTag(m){if(!m.cambioGrupo)return '<span class="pill ex" title="Falta enlazar la salida, la entrada y los pagos">sin enlazar</span>';var r=resumenCambio(movsGrupo(m.cambioGrupo)),e=CAMBIO_ESTADO[r.estado];return (m.cambioArea?'<span class="s">'+esc(areaLabel(m.cambioArea))+'</span>':'')+'<span class="pill '+e[0]+'">'+e[1]+(r.tc?' · TC '+r.tc.toFixed(3):'')+'</span>';}
-function clsHtml(m){
+function clsHtml(m){var h=clsHtml0(m);if(m.bot!=='auto')return h;var p='<span class="pill brand botpill" title="Clasificado por el bot · falta revisar">'+ico('robot')+'Bot</span>';return h.indexOf('<div class="clsline">')===0?h.replace('<div class="clsline">','<div class="clsline">'+p):p+h;}
+function clsHtml0(m){
   if(esIngreso(m)){var c=m.clas;var col=c==='VENTAS'?'#16a34a':c==='COBRANZA'?'#0ea5e9':c==='OTROS'?'#64748b':c==='FINANCIAMIENTO'?'#a78bfa':c==='CAMBIO'?'#14b8a6':'#94a3b8';
     return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+col+'"></span>'+esc(c==='CAMBIO'?'Cambio de moneda':c?clasLabel(c):'Sin clasificar')+'</span>'+(c==='CAMBIO'?cambioTag(m):'')+(m.asesor?'<span class="s">'+esc(m.asesor)+'</span>':'')+'</div>';}
   if(m.esFijo)return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:var(--gr-brand)"></span>Costo fijo</span><span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>'+esc(repartoTxt(m))+'</span></span>'+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+'</div>';
@@ -1428,7 +1451,7 @@ function clsHtml(m){
 }
 function detBase(){var s=SEARCH.trim().toLowerCase();return movsFiltro().filter(function(m){return !s||movTexto(m).indexOf(s)!==-1;});}
 function detFiltrados(base){return base.filter(function(m){
-  if(FILTER==='rev')return m.area==='REVISAR';if(FILTER==='in')return esIngreso(m);if(FILTER==='out')return !esIngreso(m);return true;});}
+  if(FILTER==='rev')return m.area==='REVISAR';if(FILTER==='bot')return m.bot==='auto';if(FILTER==='in')return esIngreso(m);if(FILTER==='out')return !esIngreso(m);return true;});}
 function renderDetalle(){
   var c=$('detCard');if(!c)return;
   c.innerHTML='<div class="card-head"><div><h2 class="card-title">Detalle '+(F().rango?'del período':'del mes')+'</h2><div class="card-sub" id="detSub"></div></div>'
@@ -1441,11 +1464,12 @@ function renderDetLista(){
   var total=movsFiltro().length,base=detBase(),lista=detFiltrados(base);
   Object.keys(CHECKED).forEach(function(k){if(!DB.movs[k])delete CHECKED[k];});
   if(SEL&&!DB.movs[SEL])SEL=null;
-  var nRev=base.filter(function(m){return m.area==='REVISAR';}).length,nIn=base.filter(esIngreso).length;
+  var nRev=base.filter(function(m){return m.area==='REVISAR';}).length,nIn=base.filter(esIngreso).length,nBot=base.filter(function(m){return m.bot==='auto';}).length;
   $('detSub').textContent=lista.length+' de '+total+' · toca una fila para '+(READONLY?'ver el detalle':'clasificarla');
   function chip(k,l,n,red){return '<button class="chip'+(FILTER===k?' on':'')+'" data-f="'+k+'">'+l+'<span class="c'+(red&&n?' red':'')+'">'+n+'</span></button>';}
   var nChk=Object.keys(CHECKED).length;
-  var h='<div class="chips">'+chip('all','Todos',base.length)+chip('rev','Solo REVISAR',nRev,true)+chip('in','Ingresos',nIn)+chip('out','Egresos',base.length-nIn)+'</div>';
+  var h='<div class="chips">'+chip('all','Todos',base.length)+chip('rev','Solo REVISAR',nRev,true)+(nBot||FILTER==='bot'?chip('bot','Del bot',nBot):'')+chip('in','Ingresos',nIn)+chip('out','Egresos',base.length-nIn)+'</div>';
+  if(!READONLY&&FILTER==='bot'&&lista.length)h+='<div class="alert pos" style="align-items:center">'+ico('robot')+'<span>Revisa que estén bien y confírmalos. Lo que corrijas, el bot lo aprende para la próxima.</span><button class="btn btn-success btn-sm" id="botConf" style="margin-left:auto">'+ico('check')+'Confirmar '+lista.length+'</button></div>';
   if(!READONLY&&nChk)h+='<div class="bulkbar"><span>'+nChk+(nChk===1?' seleccionado':' seleccionados')+'</span><select id="bkArea"><option value="">Asignar área…</option>'+AREAS.filter(function(a){return a!=='INGRESO';}).map(function(a){return '<option value="'+a+'">'+esc(areaLabel(a))+'</option>';}).join('')+'</select>'
     +'<button id="bkFijo">'+ico('buildings')+'Marcar como fijo</button><button id="bkClear">'+ico('x')+'Quitar selección</button></div>';
   if(!lista.length){h+=FILTER==='rev'?emptyHtml('check-circle','No hay movimientos con este filtro','Todo lo de REVISAR ya está clasificado.'):emptyHtml('magnifying-glass','No hay movimientos con este filtro','Prueba con otra búsqueda.');
@@ -1459,14 +1483,14 @@ function renderDetLista(){
   var cards='<div class="mcards">'+lista.map(function(m){var sig=sigOf(m),ing=esIngreso(m);
     var lab=ing?(m.clas?clasLabel(m.clas):'Sin clasificar'):(m.esFijo?'Costo fijo · '+repartoTxt(m):areaLabel(m.area));var col=ing?'#16a34a':(m.esFijo?'var(--gr-brand)':(m.area==='REVISAR'?'var(--gr-neg)':(AREA_COLOR[m.area]||'#64748b')));
     return '<button class="mcard'+(m.area==='REVISAR'?' rev':'')+'" data-sig="'+encodeURIComponent(sig)+'"><div class="l1"><span class="d">'+esc(m.desc||m.mov)+'</span>'+montoHtml(m)+'</div>'
-      +'<div class="l2"><span>'+dmy(m.fecha)+'</span><span style="display:inline-flex;align-items:center;gap:5px;font-weight:600;color:var(--gr-text)"><span class="dot round" style="background:'+col+'"></span>'+esc(lab)+'</span>'+(m.asesor||m.personal?'<span>'+esc(m.asesor||m.personal)+'</span>':'')+''+'</div></button>';}).join('')+'</div>';
+      +'<div class="l2"><span>'+dmy(m.fecha)+'</span>'+(m.bot==='auto'?'<span class="pill brand botpill" style="margin:0">'+ico('robot')+'Bot</span>':'')+'<span style="display:inline-flex;align-items:center;gap:5px;font-weight:600;color:var(--gr-text)"><span class="dot round" style="background:'+col+'"></span>'+esc(lab)+'</span>'+(m.asesor||m.personal?'<span>'+esc(m.asesor||m.personal)+'</span>':'')+''+'</div></button>';}).join('')+'</div>';
   h+='<div class="det-wrap'+(SEL?' con-panel':'')+'"><div class="det-list">'+tabla+cards+'</div><div class="panel'+(SEL&&PANEL_MOVIL?' open':'')+'" id="detPanel"'+(SEL?'':' style="display:none"')+'>'+(SEL?panelHtml():'')+'</div></div>';
   inner.innerHTML=h;wireDet(lista);
 }
 var PANEL_MOVIL=false;
 function abrirPanelMovil(){PANEL_MOVIL=true;var p=$('detPanel');if(p)p.classList.add('open');$('panelBg').classList.add('open');}
 function cerrarPanelMovil(){PANEL_MOVIL=false;var p=$('detPanel');if(p)p.classList.remove('open');$('panelBg').classList.remove('open');}
-function siguienteRev(desde){var l=detFiltrados(detBase()).filter(function(m){return m.area==='REVISAR'&&sigOf(m)!==desde;});return l.length?sigOf(l[0]):null;}
+function siguienteRev(desde){var l=detFiltrados(detBase()).filter(function(m){return (FILTER==='bot'?m.bot==='auto':m.area==='REVISAR')&&sigOf(m)!==desde;});return l.length?sigOf(l[0]):null;}
 function panelCambioHtml(m){
   if(m.cambioGrupo)return historialCambioHtml(m.cambioGrupo,sigOf(m))+'<button class="btn btn-secondary" id="pCam" style="align-self:flex-start">'+ico('arrows-left-right')+'Editar el cambio</button>';
   if(esMovCambio(m)||/MUVEX|CASA DE CAMBIO|D[OÓ]LAR/i.test((m.desc||'')+' '+(m.obs||'')))return '<div class="alert warn">'+ico('arrows-left-right')+'<span>'+(esMovCambio(m)?'Es un cambio de moneda pero aún no está enlazado':'Parece una compra o venta de dólares. Si lo es, ármalo como cambio de moneda: no es gasto ni ingreso, y queda enlazado')+(esMovCambio(m)?' ':'')+' con su '+(m.cargo>0?'entrada':'salida')+' en la otra cuenta y los pagos que se hicieron.</span></div><button class="btn btn-primary" id="pCam" style="align-self:flex-start">'+ico('arrows-left-right')+'Armar el cambio</button>';
@@ -1478,6 +1502,9 @@ function panelHtml(){
   var h='<div class="ph-head"><span class="pill '+(ing?'ok':'ex')+'">'+(ing?'Ingreso':'Egreso')+'</span><span class="muted" style="font-size:12.5px">'+dmy(m.fecha)+' · '+esc(m.mov)+'</span><button class="x" id="pClose" aria-label="Cerrar">'+ico('x')+'</button></div><div class="ph-body">'
     +'<div style="display:flex;flex-direction:column;gap:6px"><div class="desc">'+esc(m.desc||m.mov)+'</div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="bigamt '+(ing?'pos':'neg')+'">'+(u?U(monto(m)):S(monto(m)))+'</span>'+(u?'<span class="tag-usd" style="font-size:11px;padding:2px 7px">USD · cuenta 5946</span>':'')+'</div>'+(m.numOp?'<div class="muted3" style="font-size:12px">N° operación '+esc(m.numOp)+'</div>':'')+'</div>';
   if(!ing&&m.area==='REVISAR')h+='<div class="alert neg">'+ico('warning')+'<span>Sin área asignada. Elige un área para que cuente en la distribución.</span></div>';
+  if(!READONLY){var sgb=(m.bot==='auto'||m.area==='REVISAR'||(ing&&!m.clas))?botSugerir(m):null;
+    if(m.bot==='auto')h+='<div class="alert pos botbox">'+ico('robot')+'<span><b>Lo clasificó el bot</b>'+(sgb?': los '+Math.min(sgb.n,3)+' últimos movimientos parecidos se clasificaron así'+(sgb.ej?' (el más reciente, del '+dmy(sgb.ej.fecha)+')':''):'')+'. Si está bien, toca <b>Guardar</b> para confirmarlo; si lo corriges, el bot aprende.</span></div>';
+    else if(sgb&&sgb.ej)h+='<div class="alert brand botbox" style="align-items:center">'+ico('robot')+'<span><b>El bot sugiere:</b> '+esc(botTxt(sgb.ej))+'<br><span class="muted" style="font-size:12px">'+sgb.iguales+' de '+sgb.de+' movimientos parecidos se clasificaron así</span></span><button class="btn btn-primary btn-sm" id="pBotAp" style="margin-left:auto">Aplicar</button></div>';}
   if(!READONLY){
     if(ing){
       h+='<label class="pfield">Clasificación<select id="pClas">'+Object.keys(CLAS_LABEL).map(function(c){return '<option value="'+c+'"'+((m.clas||'')===c?' selected':'')+'>'+esc(c?CLAS_LABEL[c]:'— Sin clasificar —')+'</option>';}).join('')+'</select></label>'
@@ -1517,6 +1544,8 @@ function wireDet(lista){
   var bc=$('bkClear');if(bc)bc.onclick=function(){CHECKED={};renderDetLista();};
   var ba=$('bkArea');if(ba)ba.onchange=function(){if(ba.value)accionMasiva(function(m){if(esIngreso(m))return false;m.area=ba.value;return true;},'Área asignada');};
   var bf=$('bkFijo');if(bf)bf.onclick=function(){accionMasiva(function(m){if(esIngreso(m)||m.esFijo)return false;m.esFijo=true;return true;},'Marcados como fijos');};
+  var bcf=$('botConf');if(bcf)bcf.onclick=async function(){var l=lista.filter(function(m){return m.bot==='auto';});bcf.disabled=true;SILENT=true;for(var i=0;i<l.length;i++){l[i].bot='';await updateMov(l[i]);}SILENT=false;setSync('');toast(l.length+(l.length===1?' movimiento confirmado':' movimientos confirmados'));FILTER='all';renderActual();};
+  var pba=$('pBotAp');if(pba)pba.onclick=async function(){var m=DB.movs[SEL],sg=m&&botSugerir(m);if(!sg||!sg.ej)return;botAplicar(m,sg.ej);m.bot='';await updateMov(m);toast('Aplicado: '+botTxt(sg.ej));renderActual();};
   var pc=$('pClose');if(pc)pc.onclick=function(){SEL=null;cerrarPanelMovil();renderDetLista();};
   var pd=$('pDel');if(pd)pd.onclick=function(){deleteMov(SEL);};
   var ps=$('pSave');if(ps)ps.onclick=function(){guardarPanel(false);};
@@ -1538,7 +1567,7 @@ function leerPanel(m){
   if(esIngreso(m)){m.clas=$('pClas').value;m.asesor=$('pAses').value;if($('pLoteQ')&&leerIngresoCampos(m,'p')===false)return false;}
   else{m.area=$('pArea').value;m.personal=$('pPers').value;m.esFijo=$('pFijo').checked;
     if($('pTipo')){m.concepto=tiposDe(m.area).length?$('pTipo').value:'';m.periodoRef=tipoConMes(m.concepto)?($('pPer').value||ym(m.fecha)):'';}}
-  m.obs=$('pObs').value;
+  m.obs=$('pObs').value;m.bot='';
 }
 async function guardarPanel(siguiente){
   var m=DB.movs[SEL];if(!m||READONLY)return;
@@ -1550,7 +1579,7 @@ async function guardarPanel(siguiente){
 }
 async function accionMasiva(fn,msg){
   var sigs=Object.keys(CHECKED),n=0,omit=0;SILENT=true;
-  for(var i=0;i<sigs.length;i++){var m=DB.movs[sigs[i]];if(!m)continue;if(fn(m)){await updateMov(m);n++;}else omit++;}
+  for(var i=0;i<sigs.length;i++){var m=DB.movs[sigs[i]];if(!m)continue;if(fn(m)){m.bot='';await updateMov(m);n++;}else omit++;}
   SILENT=false;CHECKED={};setSync('');
   toast(msg+': '+n+(n===1?' movimiento':' movimientos')+(omit?' · '+omit+' sin cambios (ingresos o ya marcados)':''));
   renderActual();
