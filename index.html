@@ -64,10 +64,12 @@ button{cursor:pointer}
 .field{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-sm);font-weight:600;color:var(--gr-text-2)}
 .field input{height:44px;padding:0 14px;border:1px solid var(--gr-border);border-radius:var(--r-md);background:var(--gr-surface-2);font-size:14px;color:var(--gr-text);outline:none}
 .field input:focus{border-color:var(--gr-action);background:#fff}
+.lolvido{border:0;background:none;color:var(--gr-brand);font-size:12.5px;font-weight:600;cursor:pointer;padding:2px 0;text-align:left}
+.lmsg{display:none;padding:10px 12px;border-radius:var(--r-md);background:var(--gr-pos-bg);color:var(--gr-pos-ink);font-size:13px}
 .loginerr{display:none;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:var(--r-md);background:var(--gr-neg-bg);color:var(--gr-neg-ink);font-size:13px}
 .loginerr .ph{font-size:18px}
-#lbtn{height:46px;border:0;border-radius:var(--r-md);background:var(--gr-brand);color:#fff;font-size:15px;font-weight:700}
-#lbtn:hover{background:var(--gr-brand-700)} #lbtn:disabled{opacity:.7}
+#lbtn,#pwbtn{height:46px;border:0;border-radius:var(--r-md);background:var(--gr-brand);color:#fff;font-size:15px;font-weight:700}
+#lbtn:hover,#pwbtn:hover{background:var(--gr-brand-700)} #lbtn:disabled,#pwbtn:disabled{opacity:.7}
 
 /* ---------- Estructura ---------- */
 #app{display:none;min-height:100vh}
@@ -638,6 +640,16 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
     <label class="field">Contraseña<input type="password" id="lpass" autocomplete="current-password" placeholder="••••••••"></label>
     <div class="loginerr" id="lerr"><i class="ph ph-warning-circle"></i><span>Correo o contraseña incorrectos. Revisa e inténtalo otra vez.</span></div>
     <button id="lbtn">Entrar</button>
+    <button type="button" class="lolvido" id="lolv">¿Olvidaste tu contraseña? · Crear o cambiar contraseña</button>
+    <div class="lmsg" id="lmsg"></div>
+  </div>
+  <div class="loginbox" id="pwbox" style="display:none">
+    <img class="loginlogo" src="logo_robles.webp" alt="Grupo Robles">
+    <div><h2 id="pwTit">Crea tu contraseña</h2><div class="lsub" id="pwSub"></div></div>
+    <label class="field">Nueva contraseña<input type="password" id="pw1" autocomplete="new-password" placeholder="Mínimo 8 caracteres"></label>
+    <label class="field">Repite la contraseña<input type="password" id="pw2" autocomplete="new-password" placeholder="••••••••"></label>
+    <div class="loginerr" id="pwerr"><i class="ph ph-warning-circle"></i><span id="pwerrTxt"></span></div>
+    <button id="pwbtn">Guardar y entrar</button>
   </div>
 </div>
 
@@ -753,6 +765,8 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
 // ============ Supabase ============
 var SB_URL='https://vhqavbthsdhiwspwidhr.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZocWF2YnRoc2RoaXdzcHdpZGhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MDg1NjMsImV4cCI6MjA5OTI4NDU2M30.MFEHIgt2OPHD71tBs1k7b1TWWFNShP10Bvj3gH4Vvvo';
+// Enlace del correo: invitación o recuperar contraseña (se lee antes de que la librería limpie la dirección)
+var LINK_TIPO=((location.hash||'').match(/type=(invite|recovery)/)||[])[1]||'',LINK_ERR=decodeURIComponent(((location.hash||'').match(/error_description=([^&]*)/)||[])[1]||'').replace(/\+/g,' ');
 var sb=supabase.createClient(SB_URL,SB_KEY);
 var DB={movs:{},saldos:{},asesores:[],metas:{},metasPersonal:{}}, ROL='viewer', USUARIO=null, READONLY=true;
 // columnas nuevas (se detectan al cargar, para no romper si aún no existen en la BD)
@@ -2939,10 +2953,30 @@ async function entrar(){
   await iniciar();
 }
 async function salir(){await sb.auth.signOut();location.reload();}
+// Crear o cambiar la contraseña desde el enlace del correo
+function mostrarClave(tipo){var u=USUARIO||{};$('login').style.display='flex';$('app').style.display='none';
+  Array.prototype.forEach.call(document.querySelectorAll('#login .loginbox'),function(b){b.style.display=b.id==='pwbox'?'':'none';});
+  $('pwTit').textContent=tipo==='recovery'?'Cambia tu contraseña':'Crea tu contraseña';
+  $('pwSub').textContent=(u.email?u.email+' · ':'')+'después entrarás con tu correo y esta contraseña';$('pw1').focus();}
+async function guardarClave(){var a=$('pw1').value,b=$('pw2').value,e=$('pwerr');e.style.display='none';
+  function err(t){$('pwerrTxt').textContent=t;e.style.display='flex';}
+  if(a.length<8)return err('La contraseña debe tener al menos 8 caracteres.');
+  if(a!==b)return err('Las dos contraseñas no coinciden.');
+  var btn=$('pwbtn');btn.disabled=true;btn.textContent='Guardando…';
+  var r=await sb.auth.updateUser({password:a});btn.disabled=false;btn.textContent='Guardar y entrar';
+  if(r.error)return err('No se pudo guardar: '+r.error.message);
+  history.replaceState(null,'',location.pathname);LINK_TIPO='';
+  Array.prototype.forEach.call(document.querySelectorAll('#login .loginbox'),function(x){x.style.display=x.id==='pwbox'?'none':'';});
+  await iniciar();toast('Contraseña guardada');}
+async function olvide(){var email=$('lemail').value.trim(),m=$('lmsg');$('lerr').style.display='none';
+  if(!email){m.style.display='block';m.textContent='Escribe tu correo arriba y vuelve a tocar «¿Olvidaste tu contraseña?».';$('lemail').focus();return;}
+  var r=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname});
+  m.style.display='block';m.textContent=r.error?('No se pudo enviar: '+r.error.message):('Si '+email+' tiene cuenta, le llegará un correo para crear su contraseña. Revisa también la carpeta de spam.');}
 
 // ============ Eventos ============
 BRAND_ROBLES=$('brandImg').src;BRAND_PACHA=$('pachaBrandSrc').src;
-$('lbtn').onclick=entrar;
+$('lbtn').onclick=entrar;$('lolv').onclick=olvide;$('pwbtn').onclick=guardarClave;
+$('pw2').addEventListener('keydown',function(e){if(e.key==='Enter')guardarClave();});
 $('lpass').addEventListener('keydown',function(e){if(e.key==='Enter')entrar();});
 $('salir').onclick=salir;$('salirM').onclick=salir;
 $('masBg').onclick=cerrarMas;
@@ -2969,7 +3003,9 @@ $('expTodo').onclick=function(){exportar('todo');};
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){var m=$('repModal')||$('concModal');if(m){m.remove();return;}if(SEL){SEL=null;cerrarPanelMovil();renderDetLista();}cerrarMas();}});
 
 // ============ Arranque ============
-(async function(){var s=await sb.auth.getSession();if(s.data&&s.data.session){await iniciar();}else{showLogin();}})();
+(async function(){var s=await sb.auth.getSession();
+  if(s.data&&s.data.session&&LINK_TIPO){var u=await sb.auth.getUser();USUARIO=u.data?u.data.user:null;mostrarClave(LINK_TIPO);return;}
+  if(s.data&&s.data.session){await iniciar();}else{showLogin();if(LINK_ERR){var m=$('lmsg');m.style.display='block';m.textContent='El enlace ya no es válido ('+LINK_ERR+'). Escribe tu correo y toca «¿Olvidaste tu contraseña?» para recibir uno nuevo.';}}})();
 
 </script>
 </body>
