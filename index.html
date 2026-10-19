@@ -293,6 +293,11 @@ select.input-ghost{appearance:auto}
 .alert.neg{background:var(--gr-neg-bg);color:var(--gr-neg-ink)}
 .alert.warn{background:var(--gr-warn-bg);color:var(--gr-warn-ink)}
 .alert.pos{background:var(--gr-pos-bg);color:var(--gr-pos-ink)}
+.navbadge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#f59e0b;color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}.navbadge.neg{background:#ef4444}.navbadge[hidden]{display:none}
+.sl-list{display:flex;flex-direction:column;gap:10px}.sl-item{border:1px solid var(--gr-border);border-radius:var(--r-md);padding:12px 14px;display:flex;flex-direction:column;gap:10px}.sl-item.neg{border-color:var(--gr-neg-bg);background:color-mix(in srgb,var(--gr-neg-bg) 35%,transparent)}.sl-item.warn{background:color-mix(in srgb,var(--gr-warn-bg) 30%,transparent)}
+.sl-top{display:flex;align-items:flex-start;gap:10px}.sl-item.ok .sl-top>.ph{color:var(--gr-pos)}.sl-item.warn .sl-top>.ph{color:#d97706}.sl-item.neg .sl-top>.ph{color:var(--gr-neg)}.sl-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.sl-t span{font-size:12.5px;color:var(--gr-text-2)}.sl-top .pill{flex-shrink:0;white-space:nowrap}
+.sl-meses{display:flex;flex-wrap:wrap;gap:6px;padding-left:30px}.sl-acc{padding-left:30px}
+@media(max-width:720px){.sl-top{flex-wrap:wrap}.sl-top .pill{margin-left:30px}.sl-meses,.sl-acc{padding-left:0}}
 .alert.brand{background:var(--gr-brand-50);color:var(--gr-brand)}.botpill{margin-right:6px;font-size:10.5px;padding:2px 7px;vertical-align:middle}.botpill .ph{font-size:12px}
 .pfield{display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;color:var(--gr-text-2)}
 .pfield select,.pfield input,.pfield textarea{height:40px;padding:0 12px;border:1px solid var(--gr-border);border-radius:var(--r-md);background:var(--gr-surface);font-size:13.5px;font-weight:600;color:var(--gr-text)}
@@ -719,6 +724,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
       <section class="view" id="v-conc"><div id="concBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
       <section class="view" id="v-lotes"><div id="lotesBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
       <section class="view" id="v-cac"><div id="cacBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
+      <section class="view" id="v-salud"><div id="saludBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
       <section class="view" id="v-fijos"><div id="fijosBody" style="display:flex;flex-direction:column;gap:20px"></div></section>
 
       <!-- CONSOLIDADO -->
@@ -759,6 +765,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
       <button data-v="cac"><i class="ph ph-target"></i>CAC / RPA</button>
       <button data-v="conc"><i class="ph ph-scales"></i>Conciliación</button>
       <button data-v="lotes"><i class="ph ph-map-trifold"></i>Lotes</button>
+      <button data-v="salud"><i class="ph ph-heartbeat"></i>Salud</button>
     </div>
     <a id="driveLinkM" class="mdrive" href="#" target="_blank" rel="noopener" hidden><i class="ph ph-google-drive-logo"></i>Historial y respaldo en Drive</a>
     <div class="usr"><div class="avatar" id="mAvatar">·</div><div class="t"><b id="mMail"></b><span id="mRolTxt"></span></div><button class="btn btn-secondary btn-sm" id="salirM">Salir</button></div>
@@ -1244,11 +1251,12 @@ var VIEWS={
   conc:{t:'Conciliación',s:'Con el banco · cuadre, resultado y ventas nuevas del mes',ic:'scales',lbl:'Conciliación',f:false},
   lotes:{t:'Lotes',s:'Estado, m², cliente y lo que entró al banco por cada lote',ic:'map-trifold',lbl:'Lotes',f:false},
   fijos:{t:'Costos fijos',s:'Cuánto cuesta la oficina y a quién le toca',ic:'buildings',lbl:'Costos fijos',f:true},
-  consol:{t:'Consolidado',s:'Visión anual · dólares convertidos a S/ con el TC del mes',ic:'chart-bar',lbl:'Consolidado',f:false}
+  consol:{t:'Consolidado',s:'Visión anual · dólares convertidos a S/ con el TC del mes',ic:'chart-bar',lbl:'Consolidado',f:false},
+  salud:{t:'Salud del sistema',s:'Revisión automática de los datos y respaldos · el saldo del banco manda',ic:'heartbeat',lbl:'Salud',f:false}
 };
-var ORDEN=['cargar','mes','ventas','cobranza','conc','lotes','cac','fijos','consol'];
+var ORDEN=['cargar','mes','ventas','cobranza','conc','lotes','cac','fijos','consol','salud'];
 function buildNav(){
-  $('sbNav').innerHTML=ORDEN.filter(function(v){return !(READONLY&&v==='cargar');}).map(function(v){return '<button data-v="'+v+'">'+ico(VIEWS[v].ic)+VIEWS[v].lbl+'</button>';}).join('');
+  $('sbNav').innerHTML=ORDEN.filter(function(v){return !(READONLY&&v==='cargar');}).map(function(v){return '<button data-v="'+v+'">'+ico(VIEWS[v].ic)+VIEWS[v].lbl+(v==='salud'?'<span class="navbadge" id="saludBadge" hidden></span>':'')+'</button>';}).join('');
   Array.prototype.forEach.call(document.querySelectorAll('#sbNav button,#bNav button,#masSheet .grid3 button'),function(b){b.onclick=function(){irA(b.dataset.v);};});
   $('masCargar').style.display=READONLY?'none':'';
 }
@@ -1263,7 +1271,7 @@ function irA(v){
   cerrarMas();
   if(v==='cargar'&&READONLY)v='mes';
   VISTA=v;SEL=null;cerrarPanelMovil();
-  var enMas=(v==='cargar'||v==='cobranza'||v==='cac'||v==='conc'||v==='lotes');
+  var enMas=(v==='cargar'||v==='cobranza'||v==='cac'||v==='conc'||v==='lotes'||v==='salud');
   Array.prototype.forEach.call(document.querySelectorAll('#sbNav button'),function(b){b.classList.toggle('on',b.dataset.v===v);});
   Array.prototype.forEach.call(document.querySelectorAll('#bNav button'),function(b){b.classList.toggle('on',b.dataset.v===v||(enMas&&b.dataset.v==='mas'));});
   Array.prototype.forEach.call(document.querySelectorAll('.view'),function(s){s.classList.toggle('on',s.id==='v-'+v);});
@@ -1274,7 +1282,7 @@ function irA(v){
   renderVista();window.scrollTo(0,0);
 }
 function renderVista(){var v=VISTA;
-  if(v==='mes')renderMes();else if(v==='ventas')renderVentas();else if(v==='cobranza')renderCobranza();else if(v==='cac')renderCAC();else if(v==='conc')renderConc();else if(v==='lotes')renderLotes();else if(v==='fijos')renderFijos();else if(v==='consol')renderConsol();}
+  if(v==='mes')renderMes();else if(v==='ventas')renderVentas();else if(v==='cobranza')renderCobranza();else if(v==='cac')renderCAC();else if(v==='conc')renderConc();else if(v==='lotes')renderLotes();else if(v==='fijos')renderFijos();else if(v==='consol')renderConsol();else if(v==='salud')renderSalud();}
 function renderActual(){var y=window.scrollY;renderVista();window.scrollTo(0,y);}
 function abrirMas(){$('masSheet').classList.add('open');$('masBg').classList.add('open');}
 function cerrarMas(){$('masSheet').classList.remove('open');$('masBg').classList.remove('open');}
@@ -1452,7 +1460,7 @@ function clsHtml0(m){
 }
 function detBase(){var s=SEARCH.trim().toLowerCase();return movsFiltro().filter(function(m){return !s||movTexto(m).indexOf(s)!==-1;});}
 function detFiltrados(base){return base.filter(function(m){
-  if(FILTER==='rev')return m.area==='REVISAR';if(FILTER==='bot')return m.bot==='auto';if(FILTER==='in')return esIngreso(m);if(FILTER==='out')return !esIngreso(m);return true;});}
+  if(FILTER==='rev')return m.area==='REVISAR';if(FILTER==='bot')return m.bot==='auto';if(FILTRO_SALUD[FILTER])return FILTRO_SALUD[FILTER][1](m);if(FILTER==='in')return esIngreso(m);if(FILTER==='out')return !esIngreso(m);return true;});}
 function renderDetalle(){
   var c=$('detCard');if(!c)return;
   c.innerHTML='<div class="card-head"><div><h2 class="card-title">Detalle '+(F().rango?'del período':'del mes')+'</h2><div class="card-sub" id="detSub"></div></div>'
@@ -1469,7 +1477,7 @@ function renderDetLista(){
   $('detSub').textContent=lista.length+' de '+total+' · toca una fila para '+(READONLY?'ver el detalle':'clasificarla');
   function chip(k,l,n,red){return '<button class="chip'+(FILTER===k?' on':'')+'" data-f="'+k+'">'+l+'<span class="c'+(red&&n?' red':'')+'">'+n+'</span></button>';}
   var nChk=Object.keys(CHECKED).length;
-  var h='<div class="chips">'+chip('all','Todos',base.length)+chip('rev','Solo REVISAR',nRev,true)+(nBot||FILTER==='bot'?chip('bot','Del bot',nBot):'')+chip('in','Ingresos',nIn)+chip('out','Egresos',base.length-nIn)+'</div>';
+  var h='<div class="chips">'+chip('all','Todos',base.length)+chip('rev','Solo REVISAR',nRev,true)+(nBot||FILTER==='bot'?chip('bot','Del bot',nBot):'')+(FILTRO_SALUD[FILTER]?chip(FILTER,FILTRO_SALUD[FILTER][0],detFiltrados(base).length,true):'')+chip('in','Ingresos',nIn)+chip('out','Egresos',base.length-nIn)+'</div>';
   var evN=READONLY||FILTER==='bot'||FILTER==='out'?0:evpPendientes(movsFiltro()).length;
   if(evN)h+='<div class="alert brand" style="align-items:center">'+ico('robot')+'<span><b>'+evN+(evN===1?' ingreso sin lote calza':' ingresos sin lote calzan')+'</b> con pagos registrados en Evolta. El bot puede completar lote, cliente y cuota.</span><button class="btn btn-primary btn-sm" id="evpBtn" style="margin-left:auto">Revisar</button></div>';
   if(!READONLY&&FILTER==='bot'&&lista.length)h+='<div class="alert pos" style="align-items:center">'+ico('robot')+'<span>Revisa que estén bien y confírmalos. Lo que corrijas, el bot lo aprende para la próxima.</span><button class="btn btn-success btn-sm" id="botConf" style="margin-left:auto">'+ico('check')+'Confirmar '+lista.length+'</button></div>';
@@ -2606,6 +2614,48 @@ function destinosHtml(){
     +'<p class="nota">Las salidas en dólares se muestran en soles al TC pagado'+(cm.tc?' ('+cm.tc.toFixed(3)+')':'')+'. El cambio de moneda aparece como salida a la casa de cambio.</p>');
 }
 
+// ============ Bot de mantenimiento: Salud del sistema ============
+// Las revisiones corren en Supabase (salud_sistema) y cada noche se guardan en el Drive. Regla: el saldo del banco manda.
+function esDupMov(m){if(!m.numOp)return false;var ix=memo('dupix',function(){var o={};allMovs().forEach(function(x){if(!x.numOp)return;var k=[x.fecha,x.moneda,x.cargo,x.abono,x.numOp].join('|');o[k]=(o[k]||0)+1;});return o;});return ix[[m.fecha,m.moneda,m.cargo,m.abono,m.numOp].join('|')]>1;}
+var FILTRO_SALUD={
+  ingsin:['Ingresos sin clasificar',function(m){return m.abono>0&&!m.clas&&m.area!=='REVISAR';}],
+  sinlote:['Sin lote',function(m){return esVentaCob(m)&&!m.lote&&!(m.repLotes&&m.repLotes.length)&&cuotaParse(m.cuota).k!=='DESIST';}],
+  sinpers:['Ventas sin persona',function(m){return m.cargo>0&&m.area==='VENTAS'&&!m.personal&&!m.asesor;}],
+  dup:['Posibles duplicados',esDupMov],
+  cambio:['Cambio sin enlazar',function(m){return esMovCambio(m)&&!m.cambioGrupo;}]};
+var SALUD=null,SALUD_TRY=false;
+async function cargarSalud(){try{var r=await sb.rpc('salud_sistema');if(r&&r.data&&r.data.checks)SALUD=r.data;}catch(e){}
+  var b=$('saludBadge');if(b&&SALUD){var n=SALUD.checks.filter(function(c){return c.nivel!=='ok';}).length;b.textContent=n;b.hidden=!n;b.className='navbadge'+(SALUD.checks.some(function(c){return c.nivel==='neg';})?' neg':'');}}
+function saludIrMes(y,f){FILTER=f;SEARCH='';var fm=$('fMes');if(fm&&y){fm.value=y;$('mMes').value=y;$('mMesTxt').textContent=mesCorto(y);}$('fDesde').value='';$('fHasta').value='';irA('mes');var d=$('detCard');if(d)d.scrollIntoView({block:'start'});}
+function renderSalud(){
+  var box=$('saludBody');
+  if(!SALUD){if(SALUD_TRY){box.innerHTML='<div class="card">'+emptyHtml('wifi-slash','No se pudo hacer la revisión','Revisa tu conexión.')+'<button class="btn btn-secondary" id="slRe">'+ico('arrow-clockwise')+'Reintentar</button></div>';$('slRe').onclick=function(){SALUD_TRY=false;renderSalud();};return;}
+    SALUD_TRY=true;box.innerHTML='<div class="card">'+emptyHtml('heartbeat','Revisando…','')+'</div>';cargarSalud().then(function(){if(VISTA==='salud')renderSalud();});return;}
+  SALUD_TRY=false;
+  var C=SALUD.checks,mal=C.filter(function(c){return c.nivel!=='ok';}),IC={ok:['check-circle','pos'],warn:['warning','warn'],neg:['warning-octagon','neg']};
+  var ir={revisar:'rev',bot:'bot',ingsin:'ingsin',sinlote:'sinlote',sinpers:'sinpers',dup:'dup',cambio:'cambio'};
+  function chipsMes(c){var ks=Object.keys(c.meses||{}).sort();if(!ks.length)return '';
+    return '<div class="sl-meses">'+ks.map(function(y){var v=c.meses[y],t=typeof v==='object'?[v.soles?S(v.soles):'',v.dolares?U(v.dolares):''].filter(Boolean).join(' · '):v;
+      return '<button class="mchip sl-go" data-c="'+c.id+'" data-ym="'+y+'"><span>'+mesCorto(y)+'</span><em>'+esc(t)+'</em></button>';}).join('')+'</div>';}
+  function valor(c){if(c.id==='ultimo')return c.fecha?'al '+dmy(c.fecha)+(c.n>0?' · hace '+c.n+' d':''):'—';
+    if(c.id==='n8n')return 'vence el '+dmy(c.fecha)+' · '+(c.n>=0?'faltan '+c.n+' d':'venció');
+    if(c.id==='drive')return c.fecha?'última copia '+dmy(String(c.fecha).slice(0,10))+(c.pendientes?' · '+c.pendientes+' cambios por enviar':'')+(c.fallidos?' · '+c.fallidos+' envíos fallidos':''):'sin copia';
+    return c.n?String(c.n):'Todo bien';}
+  var extra='';
+  if(!READONLY&&LT.pagos){var ev=evpPendientes(allMovs()).length;if(ev)extra='<div class="alert brand" style="align-items:center;margin-top:8px">'+ico('robot')+'<span>El bot puede completar <b>'+ev+'</b> con los pagos de Evolta.</span><button class="btn btn-primary btn-sm" id="slEvp" style="margin-left:auto">Revisar</button></div>';}
+  var h='<div class="card"><div class="card-head"><div><h2 class="card-title">'+(mal.length?mal.length+(mal.length===1?' punto por revisar':' puntos por revisar'):'Todo en orden')+'</h2><div class="card-sub">Revisado '+new Date(SALUD.at).toLocaleString('es-PE',{dateStyle:'medium',timeStyle:'short'})+' · cada noche se guarda en el Drive</div></div><button class="btn btn-secondary btn-sm" id="slRe">'+ico('arrow-clockwise')+'Revisar de nuevo</button></div>'
+    +'<div class="alert pos" style="margin-bottom:12px">'+ico('bank')+'<span><b>Regla:</b> lo que publica el banco en Movimientos es lo que vale. Los bots solo ponen etiquetas (área, lote, cliente); nunca cambian montos ni fechas.</span></div>'
+    +'<div class="sl-list">'+C.slice().sort(function(a,b){var o={neg:0,warn:1,ok:2};return o[a.nivel]-o[b.nivel];}).map(function(c){var I=IC[c.nivel]||IC.ok;
+      return '<div class="sl-item '+c.nivel+'"><div class="sl-top">'+ico(I[0],'font-size:20px')+'<div class="sl-t"><b>'+esc(c.titulo)+'</b><span>'+esc(c.que)+'</span></div><span class="pill '+(c.nivel==='ok'?'ok':c.nivel==='neg'?'ex':'warn')+'">'+esc(valor(c))+'</span></div>'
+        +(c.nivel!=='ok'?chipsMes(c):'')+(c.id==='sinlote'&&c.n?extra:'')+(c.id==='drive'?'<div class="sl-acc"><a class="btn btn-ghost btn-sm" id="slDrive" target="_blank" rel="noopener" hidden>'+ico('google-drive-logo')+'Abrir el Drive</a></div>':'')+'</div>';}).join('')+'</div></div>';
+  box.innerHTML=h;
+  $('slRe').onclick=function(){SALUD=null;SALUD_TRY=false;renderSalud();};
+  var se=$('slEvp');if(se)se.onclick=function(){abrirEvpLote(allMovs());};
+  var dl=$('driveLink'),sd=$('slDrive');if(sd&&dl&&!dl.hidden){sd.href=dl.href;sd.hidden=false;}
+  Array.prototype.forEach.call(box.querySelectorAll('.sl-go'),function(b){b.onclick=function(){var c=b.dataset.c,y=b.dataset.ym;
+    if(c==='cuadre'||c==='sinsaldo'){CV.ym=y;irA('conc');return;}if(ir[c])saludIrMes(y,ir[c]);};});
+}
+
 // ============ Lotes: estado, cliente y lo que entró al banco por cada lote ============
 // Estado, m² y precio: Stock de Evolta · cliente y pagado según Evolta: Flujo de Caja · dinero: Movimientos (banco)
 var LT={etapa:'ETAPA III',q:'',est:'',sel:null,stock:null,contratos:null,planos:{},zoom:1,cargando:false,error:''};
@@ -3033,6 +3083,7 @@ async function iniciar(){
   ROL=(perf.data&&perf.data.rol)?perf.data.rol:'viewer';
   $('login').style.display='none';$('app').style.display='block';
   aplicarRol();
+  setTimeout(cargarSalud,1500);
   sb.rpc('drive_link').then(function(r){var u=r&&r.data;if(u){['driveLink','driveLinkM'].forEach(function(id){var a=$(id);a.href=u;a.hidden=false;});}});
   try{await cargarNube();}catch(e){setSync('error al cargar');}
   buildFilters();
