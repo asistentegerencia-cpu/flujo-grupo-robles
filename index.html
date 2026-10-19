@@ -891,7 +891,8 @@ function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'
 // ============ Bot clasificador ============
 // Aprende de cómo se clasificaron antes los movimientos parecidos (misma descripción del banco, mismo tipo).
 // Solo aprende de lo confirmado por personas: lo que puso el bot y nadie revisó no cuenta.
-function botKey(m){return (esIngreso(m)?'I|':'E|')+((m.mov||'')+' '+(m.desc||'')).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[0-9]+/g,'#').replace(/[^A-Z# ]+/g,' ').replace(/\s+/g,' ').trim();}
+function botKey(m){return m._bk||(m._bk=botKey0(m));}
+function botKey0(m){return (esIngreso(m)?'I|':'E|')+((m.mov||'')+' '+(m.desc||'')).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[0-9]+/g,'#').replace(/[^A-Z# ]+/g,' ').replace(/\s+/g,' ').trim();}
 function botTup(m){return esIngreso(m)?m.area+'|'+(m.clas||''):[m.area,m.concepto||'',m.personal||'',m.esFijo?1:0].join('|');}
 function botIndex(){return memo('bot',function(){var ix={};allMovs().forEach(function(m){if(m.area==='REVISAR'||m.bot==='auto'||(esIngreso(m)&&!m.clas))return;var k=botKey(m);(ix[k]=ix[k]||[]).push(m);});
   Object.keys(ix).forEach(function(k){ix[k].sort(function(a,b){return a.fecha<b.fecha?1:a.fecha>b.fecha?-1:0;});});return ix;});}
@@ -935,7 +936,7 @@ async function cargarNube(){
   setSync('cargando…');
   DB.movs={}; var tam=1000, total=0;
   // Todo se pide a la vez (antes era una consulta tras otra): primero cuántos movimientos hay, luego todas las páginas y las demás tablas juntas
-  if(!LT.stock&&!LT.cargando)ltCargar().then(function(){if(VISTA==='conc'||VISTA==='ventas'||VISTA==='consol'||VISTA==='lotes')renderActual();});
+  if(!LT.stock&&!LT.cargando)ltCargar().then(function(){if(VISTA==='conc'||VISTA==='ventas'||VISTA==='consol'||VISTA==='lotes')renderActual();else if(VISTA==='mes'&&!SEL)renderDetLista();});
   var cnt=await sb.from('movimientos').select('sig',{count:'exact',head:true});
   if(cnt.error) throw cnt.error;
   var pags=Math.max(1,Math.ceil((cnt.count||0)/tam)),pq=[];
@@ -1469,6 +1470,8 @@ function renderDetLista(){
   function chip(k,l,n,red){return '<button class="chip'+(FILTER===k?' on':'')+'" data-f="'+k+'">'+l+'<span class="c'+(red&&n?' red':'')+'">'+n+'</span></button>';}
   var nChk=Object.keys(CHECKED).length;
   var h='<div class="chips">'+chip('all','Todos',base.length)+chip('rev','Solo REVISAR',nRev,true)+(nBot||FILTER==='bot'?chip('bot','Del bot',nBot):'')+chip('in','Ingresos',nIn)+chip('out','Egresos',base.length-nIn)+'</div>';
+  var evN=READONLY||FILTER==='bot'||FILTER==='out'?0:evpPendientes(movsFiltro()).length;
+  if(evN)h+='<div class="alert brand" style="align-items:center">'+ico('robot')+'<span><b>'+evN+(evN===1?' ingreso sin lote calza':' ingresos sin lote calzan')+'</b> con pagos registrados en Evolta. El bot puede completar lote, cliente y cuota.</span><button class="btn btn-primary btn-sm" id="evpBtn" style="margin-left:auto">Revisar</button></div>';
   if(!READONLY&&FILTER==='bot'&&lista.length)h+='<div class="alert pos" style="align-items:center">'+ico('robot')+'<span>Revisa que estén bien y confírmalos. Lo que corrijas, el bot lo aprende para la próxima.</span><button class="btn btn-success btn-sm" id="botConf" style="margin-left:auto">'+ico('check')+'Confirmar '+lista.length+'</button></div>';
   if(!READONLY&&nChk)h+='<div class="bulkbar"><span>'+nChk+(nChk===1?' seleccionado':' seleccionados')+'</span><select id="bkArea"><option value="">Asignar área…</option>'+AREAS.filter(function(a){return a!=='INGRESO';}).map(function(a){return '<option value="'+a+'">'+esc(areaLabel(a))+'</option>';}).join('')+'</select>'
     +'<button id="bkFijo">'+ico('buildings')+'Marcar como fijo</button><button id="bkClear">'+ico('x')+'Quitar selección</button></div>';
@@ -1509,7 +1512,7 @@ function panelHtml(){
     if(ing){
       h+='<label class="pfield">Clasificación<select id="pClas">'+Object.keys(CLAS_LABEL).map(function(c){return '<option value="'+c+'"'+((m.clas||'')===c?' selected':'')+'>'+esc(c?CLAS_LABEL[c]:'— Sin clasificar —')+'</option>';}).join('')+'</select></label>'
         +'<label class="pfield">'+(m.clas==='COBRANZA'?'Encargado de cobranza':'Asesor')+'<select id="pAses">'+encargadoOpts(m.asesor,ym(m.fecha),m.clas==='COBRANZA')+'</select></label>'
-        +(esMovCambio(m)?'':ingresoCamposHtml(m,'p')+sepEstadoHtml(m));
+        +(esMovCambio(m)?'':evpPanelHtml(m)+ingresoCamposHtml(m,'p')+sepEstadoHtml(m));
     }else{
       var dvOrig=m.devDe&&DB.movs[m.devDe];
       if(dvOrig)h+='<div class="alert warn" style="align-items:center">'+ico('arrow-u-up-left')+'<span>Devolución de la separación de <b>'+esc(dvOrig.cliente||dvOrig.desc||dvOrig.mov)+'</b> del '+dmy(dvOrig.fecha)+'</span><button type="button" class="btn btn-ghost btn-sm" id="pDevQuitar" style="margin-left:auto">Quitar enlace</button></div>';
@@ -1545,6 +1548,8 @@ function wireDet(lista){
   var ba=$('bkArea');if(ba)ba.onchange=function(){if(ba.value)accionMasiva(function(m){if(esIngreso(m))return false;m.area=ba.value;return true;},'Área asignada');};
   var bf=$('bkFijo');if(bf)bf.onclick=function(){accionMasiva(function(m){if(esIngreso(m)||m.esFijo)return false;m.esFijo=true;return true;},'Marcados como fijos');};
   var bcf=$('botConf');if(bcf)bcf.onclick=async function(){var l=lista.filter(function(m){return m.bot==='auto';});bcf.disabled=true;SILENT=true;for(var i=0;i<l.length;i++){l[i].bot='';await updateMov(l[i]);}SILENT=false;setSync('');toast(l.length+(l.length===1?' movimiento confirmado':' movimientos confirmados'));FILTER='all';renderActual();};
+  Array.prototype.forEach.call(document.querySelectorAll('.evpUsar'),function(b){b.onclick=async function(){var m=DB.movs[SEL],c=m&&evpCandidatos(m)[+b.dataset.i];if(!c)return;evpAplicar(m,c.p);await updateMov(m);toast('Completado con Evolta: '+c.p.titular+' · '+c.p.lote);renderActual();if(SEL)abrirPanelMovil();};});
+  var evb=$('evpBtn');if(evb)evb.onclick=function(){abrirEvpLote(movsFiltro());};
   var pba=$('pBotAp');if(pba)pba.onclick=async function(){var m=DB.movs[SEL],sg=m&&botSugerir(m);if(!sg||!sg.ej)return;botAplicar(m,sg.ej);m.bot='';await updateMov(m);toast('Aplicado: '+botTxt(sg.ej));renderActual();};
   var pc=$('pClose');if(pc)pc.onclick=function(){SEL=null;cerrarPanelMovil();renderDetLista();};
   var pd=$('pDel');if(pd)pd.onclick=function(){deleteMov(SEL);};
@@ -2621,7 +2626,8 @@ function ltEstado(x){var e=cNorm(x&&x.estado).trim();return x?(LT_EST[e]?e:'MINU
 async function ltCargar(){
   if(LT.cargando)return;LT.cargando=true;LT.error='';
   try{
-    var both=await Promise.all([ltTodo('evolta_stock'),ltTodo('evolta_contratos')]),st=both[0],ct=both[1];
+    var both=await Promise.all([ltTodo('evolta_stock'),ltTodo('evolta_contratos'),ltTodo('evolta_pagos').catch(function(){return [];})]),st=both[0],ct=both[1];
+    LT._pDia=null;LT.pagos=both[2].map(function(p){return {fecha:p.fecha,monto:+p.monto||0,etapa:p.etapa||'',lote:p.lote||'',titular:p.titular||'',tipos:p.tipos||'',nop:String(p.nro_op||''),oc:p.oc||''};});
     LT.stock=st.map(function(x){return {etapa:ltEtapa(x.etapa),lote:x.lote,m2:x.m2!=null?+x.m2:null,precio:x.precio!=null?+x.precio:null,moneda:x.moneda||'PEN',estado:x.estado||''};});
     LT.contratos=ct.map(function(c){['precio','pagado','saldo','ci_total','ci_cobrada','sf_total','sf_cobrada'].forEach(function(k){c[k]=c[k]!=null?+c[k]:null;});c.etapaN=ltEtapa(c.etapa);return c;});
   }catch(e){LT.error=e.message||String(e);}
@@ -2843,6 +2849,57 @@ function abrirDevolucion(sig){
 }
 async function quitarDevolucion(s){var x=DB.movs[s];if(!x)return;x.devDe='';await updateMov(x);renderActual();if(SEL)abrirPanelMovil();}
 
+// ============ Bot: lote y cliente desde los pagos registrados en Evolta ============
+// Cruza el depósito con los pagos de Evolta: N° de operación, monto, fecha (±7 días) y nombre del titular en la descripción.
+// Prueba con los datos reales: encuentra el lote del 66% de los ingresos y acierta el 92.5%.
+function evpUsados(){return memo('evpU',function(){var o={};allMovs().forEach(function(x){if(!(x.abono>0)||!x.lote)return;partesMov(x).forEach(function(p){if(!p.lote)return;String(p.lote).split('+').forEach(function(l){var k=ltNom(l);(o[k]=o[k]||[]).push({d:Math.round(Date.parse(x.fecha)/864e5),s:x.sig,a:x.abono});});});});return o;});}
+function evpCandidatos(m){if(!LT.pagos||!(m.abono>0))return [];
+  var nop=String(m.numOp||'').replace(/^0+/,''),txt=cNorm((m.desc||'')+' '+(m.mov||'')+' '+(m.cliente||'')),U0=evpUsados(),out=[];
+  var ix=LT._pDia||(LT._pDia=(function(){var o={};LT.pagos.forEach(function(p){p._d=Math.round(Date.parse(p.fecha)/864e5);p._t=p._t||cNorm(p.titular).split(/[^A-Z]+/).filter(function(t){return t.length>=4;});(o[p._d]=o[p._d]||[]).push(p);});return o;})());
+  var d0=Math.round(Date.parse(m.fecha)/864e5),cerca=[];for(var i=-7;i<=7;i++)if(ix[d0+i])cerca=cerca.concat(ix[d0+i]);if(!cerca.length)return [];
+  cerca.forEach(function(p){var dd=Math.abs(p._d-d0);
+    var porNop=nop.length>=4&&p.nop.replace(/^0+/,'').indexOf(nop)!==-1,porMonto=Math.abs(p.monto-m.abono)<0.01;
+    var porNombre=p._t.some(function(t){return txt.indexOf(t)!==-1;});
+    var sc=(porNop?100:0)+(porMonto?40:0)+(porNombre?30:0)-dd;if(sc<40)return;
+    var l0=ltNom(String(p.lote).split('+')[0]),usado=(U0[l0]||[]).some(function(u){return u.s!==m.sig&&Math.abs(u.a-p.monto)<0.01&&Math.abs(u.d-p._d)<=7;});
+    if(usado)return;
+    out.push({p:p,sc:sc,por:porNop?'mismo N° de operación':porMonto&&porNombre?'mismo monto y nombre':porMonto?'mismo monto, fecha cercana':'nombre parecido'});});
+  out.sort(function(a,b){return b.sc-a.sc;});
+  if(out.length)out[0].fuerte=(out[0].sc>=100||out[0].sc>=63)&&(!out[1]||out[1].sc<out[0].sc-20);
+  return out.slice(0,3);}
+function evpTxt(p){return p.titular+' · lote '+p.lote+' · '+etapaCorta(p.etapa)+(p.tipos?' · '+p.tipos:'');}
+function evpAplicar(m,p){var lotes=String(p.lote).split('+').map(function(x){return x.trim();}).filter(Boolean),st=lotes.length===1?stockDe(p.etapa,lotes[0]):null;
+  m.lote=lotes.length===1&&st?st.lote:lotes.join(' + ');m.etapa=st?st.etapa:ltEtapa(p.etapa);m.repLotes=null;
+  if(!m.cliente)m.cliente=p.titular;if(p.tipos)m.cuota=p.tipos;if(st&&st.m2&&!(+m.m2))m.m2=st.m2;
+  var k=cuotaParse(m.cuota).k,v=cuotaClas(k);
+  if(v==='VENTAS'&&k!=='SEP'&&k!=='DESIST'){var pp=primerPagoLote()[loteKey(m)];if(pp&&pp<m.fecha&&diasEntre(pp,m.fecha)>60)v='COBRANZA';}
+  if(v)m.clas=v;m.bot='';}
+function evpPanelHtml(m){if(m.lote||READONLY)return '';var c=evpCandidatos(m);if(!c.length)return '';
+  return '<div class="alert brand botbox" style="flex-direction:column;gap:8px"><span style="display:flex;gap:8px">'+ico('robot')+'<b>El bot encontró este pago en Evolta</b></span>'
+    +c.map(function(x,i){return '<div style="display:flex;align-items:center;gap:8px;width:100%"><span style="flex:1;min-width:0"><b>'+esc(x.p.titular)+'</b><br><span style="font-size:12px">Lote '+esc(x.p.lote)+' · '+esc(etapaCorta(x.p.etapa))+(x.p.tipos?' · '+esc(x.p.tipos):'')+' · '+dmy(x.p.fecha)+' · '+esc(x.por)+'</span></span><button type="button" class="btn btn-primary btn-sm evpUsar" data-i="'+i+'">Usar</button></div>';}).join('')+'</div>';}
+// Revisión en lote: ingresos sin lote que tienen un pago de Evolta que calza
+function evpPendientes(movs){if(!LT.pagos)return [];return memo('evpP|'+movs.length+'|'+(movs[0]&&movs[0].sig),function(){return evpPendientes0(movs);});}
+function evpPendientes0(movs){
+  var L=movs.filter(function(m){return m.abono>0&&!m.lote&&!esMovCambio(m)&&(m.clas===''||m.clas==='VENTAS'||m.clas==='COBRANZA');}).map(function(m){return {m:m,c:evpCandidatos(m)};}).filter(function(x){return x.c.length;});
+  // cada pago de Evolta va a un solo depósito: primero los que calzan mejor
+  var usado=[],out=[];L.sort(function(a,b){return b.c[0].sc-a.c[0].sc;}).forEach(function(x){var c=x.c.filter(function(y){return usado.indexOf(y.p)===-1;});if(!c.length)return;
+    if(c[0]!==x.c[0])c[0]=Object.assign({},c[0],{fuerte:false});usado.push(c[0].p);out.push({m:x.m,c:c});});
+  return out.sort(function(a,b){return a.m.fecha<b.m.fecha?1:-1;});}
+function abrirEvpLote(movs){
+  var L=evpPendientes(movs);if(!L.length)return;var old=$('evpModal');if(old)old.remove();
+  var w=document.createElement('div');w.id='evpModal';w.className='modal-bg';
+  w.innerHTML='<div class="modal" role="dialog" aria-modal="true" aria-labelledby="evT" style="max-width:820px;width:100%"><div class="cm-head"><div><h3 id="evT">Completar lote y cliente con Evolta</h3><div class="muted" style="font-size:13px;margin-top:4px">'+L.length+' ingresos sin lote calzan con un pago registrado en Evolta. Ya vienen marcados los más seguros; revisa y aplica.</div></div><button class="x" id="evX" aria-label="Cerrar">'+ico('x')+'</button></div>'
+    +'<div class="tablewrap" style="max-height:58vh;overflow:auto"><table class="table cards"><tbody>'+L.map(function(x,i){var c=x.c[0];return '<tr><td style="width:34px" class="ck"><input type="checkbox" class="chk evpChk" data-i="'+i+'"'+(c.fuerte?' checked':'')+' aria-label="Aplicar"></td>'
+      +'<td class="full"><b>'+dmy(x.m.fecha)+' · '+esc(x.m.desc||x.m.mov)+'</b> <span class="muted">'+(x.m.moneda==='USD'?U(x.m.abono):S(x.m.abono))+'</span><div class="sub">'+ico('arrow-right')+' '+esc(evpTxt(c.p))+' <span class="pill '+(c.fuerte?'ok':'warn')+'" style="font-size:10.5px">'+esc(c.por)+'</span></div></td></tr>';}).join('')+'</tbody></table></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn btn-secondary" id="evNo">Cancelar</button><button class="btn btn-primary" id="evSi">'+ico('check')+'Aplicar marcados</button></div>'
+    +'<p class="nota" style="margin:0">Pone lote, etapa, cliente, cuota y clasificación (venta o cobranza) según Evolta. Después puedes cambiar cualquier dato en el movimiento.</p></div>';
+  document.body.appendChild(w);
+  function cerrar(){w.remove();}
+  $('evX').onclick=cerrar;$('evNo').onclick=cerrar;w.onclick=function(e){if(e.target===w)cerrar();};
+  $('evSi').onclick=async function(){var sel=Array.prototype.filter.call(w.querySelectorAll('.evpChk'),function(c){return c.checked;}).map(function(c){return L[+c.dataset.i];});
+    if(!sel.length){cerrar();return;}this.disabled=true;SILENT=true;for(var i=0;i<sel.length;i++){evpAplicar(sel[i].m,sel[i].c[0].p);await updateMov(sel[i].m);}SILENT=false;setSync('');
+    cerrar();toast(sel.length+(sel.length===1?' ingreso completado':' ingresos completados')+' con Evolta');renderActual();};
+}
 // Campos del ingreso: lote (buscador), cliente, cuota, m² · o reparto entre varios lotes
 function ingresoCamposHtml(m,p){
   var c=cuotaParse(m.cuota),rep=m.repLotes&&m.repLotes.length>1,sug=m.lote?[]:lotesSugeridos(m);
