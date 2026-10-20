@@ -777,7 +777,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
 </div>
 <script>
 // ============ Supabase ============
-var APP_VER='2026-10-20.2';
+var APP_VER='2026-10-20.3';
 var SB_URL='https://vhqavbthsdhiwspwidhr.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZocWF2YnRoc2RoaXdzcHdpZGhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MDg1NjMsImV4cCI6MjA5OTI4NDU2M30.MFEHIgt2OPHD71tBs1k7b1TWWFNShP10Bvj3gH4Vvvo';
 // Enlace del correo: invitación o recuperar contraseña (se lee antes de que la librería limpie la dirección)
@@ -1093,8 +1093,9 @@ async function cambiarAreaAsesor(id,area){
 
 // ============ Parseo Interbank ============
 function parseFile(rows,moneda){
-  var out=[],saldo=null,cCli=-1,cCuo=-1;
+  var out=[],saldo=null,cCli=-1,cCuo=-1,cuenta='';
   for(var r=0;r<rows.length;r++){var f=rows[r]||[];
+    if(!cuenta&&r<15){var tx=f.join(' ');if(/d[oó]lar|5946\b/i.test(tx)&&/cuenta/i.test(tx))cuenta='USD';else if(/soles|5939\b/i.test(tx)&&/cuenta/i.test(tx))cuenta='PEN';}
     if(cCli<0&&cCuo<0&&f.some(function(x){return /^\s*(cargo|abono)\s*$/i.test(''+(x||''));})){f.forEach(function(x,i){var t=(''+(x||'')).trim().toLowerCase();if(t==='cliente')cCli=i;else if(t==='cuota')cCuo=i;});continue;}
     for(var c=0;c<f.length;c++){var t=(''+(f[c]||'')).toLowerCase();
       if(t.indexOf('saldo disponible')!==-1){for(var k=c+1;k<f.length;k++){var n=aNumero(f[k]);if(n!=null){saldo=n;break;}}}}
@@ -1104,7 +1105,7 @@ function parseFile(rows,moneda){
     if(!mov||!fe||(cargo==null&&abono==null))continue;
     out.push({fecha:iso(fe),mov:mov,desc:desc,numOp:numOp,moneda:moneda,cargo:cargo!=null?Math.abs(cargo):0,abono:abono!=null?Math.abs(abono):0,saldoCont:sc!=null?sc:'',cliente:cCli>=0&&f[cCli]!=null?(''+f[cCli]).trim():'',cuota:cCuo>=0&&f[cCuo]!=null?(''+f[cCuo]).trim():''});
   }
-  return {movs:out,saldo:saldo};
+  return {movs:out,saldo:saldo,cuenta:cuenta};
 }
 // ============ Datos ============
 function allMovs(){return Object.keys(DB.movs).map(function(k){return DB.movs[k];});}
@@ -1313,7 +1314,9 @@ function readFile(file,mon,cb){var rd=new FileReader();rd.onload=function(e){try
 function setDrop(w,file){
   readFile(file,w==='S'?'PEN':'USD',function(err,res){
     if(err){showErr('No pude leer el archivo de '+(w==='S'?'soles':'dólares')+'. ¿Es el Excel de Interbank?');return;}
-    PEND[w]=res;$(w==='S'?'dropS':'dropD').classList.add('ok');
+    var esperada=w==='S'?'PEN':'USD';
+    if(res.cuenta&&res.cuenta!==esperada){quitarArchivo(w);showErr('Ese archivo es de la cuenta en '+(res.cuenta==='USD'?'DÓLARES (5946)':'SOLES (5939)')+'. Súbelo en el recuadro de '+(res.cuenta==='USD'?'dólares':'soles')+'.');return;}
+    hideErr();PEND[w]=res;$(w==='S'?'dropS':'dropD').classList.add('ok');
     $(w==='S'?'fnameS':'fnameD').textContent=file.name+' · '+res.movs.length+' movs';
     $('run').disabled=!(PEND.S||PEND.D);});
 }
@@ -1330,10 +1333,17 @@ function procesar(){
     return {fecha:m.fecha,mov:m.mov,desc:m.desc,numOp:m.numOp||'',moneda:m.moneda,cargo:m.cargo,abono:m.abono,saldoCont:m.saldoCont,tc:tc,area:(function(a){return a==='CAMBIO'&&m.abono>0?'INGRESO':a;})(clasificar(m.mov,m.desc,m.abono)),obs:'',asesor:'',clas:clasificar(m.mov,m.desc,m.abono)==='CAMBIO'&&m.abono>0?'CAMBIO':'',cliente:m.cliente||'',lote:'',m2:'',concepto:'',cuota:m.cuota||'',metodoPago:'',personal:'',esFijo:false,proyecto:''};});
   built.forEach(function(b){var sg=botSugerir(b);if(sg&&sg.alta){botAplicar(b,sg.ej);b.bot='auto';}});
   // Un movimiento es NUEVO solo si su firma estable aparece mas veces en el archivo que las ya guardadas
-  var have={};allMovs().forEach(function(m){var k=baseKey(m);have[k]=(have[k]||0)+1;});
-  var used={};
-  var nuevos=built.filter(function(m){var k=baseKey(m);var u=used[k]||0;if(u<(have[k]||0)){used[k]=u+1;return false;}return true;});
-  PREVIEW={built:built,nuevos:nuevos,saldos:{S:PEND.S,D:PEND.D}};
+  // 1) misma fecha, movimiento, descripción, monto y moneda (el saldo corrido no cuenta: cambia entre descargas)
+  // 2) si el banco cambió la fecha o la descripción: mismo N° de operación, monto y moneda (±7 días)
+  var porBase={},porOp={},usado={};
+  function opKey(m){var n=String(m.numOp||'').replace(/^0+/,'');return n.length>=4?[m.moneda,n,m.cargo,m.abono].join('|'):'';}
+  allMovs().forEach(function(m){(porBase[baseKey(m)]=porBase[baseKey(m)]||[]).push(m);var k=opKey(m);if(k)(porOp[k]=porOp[k]||[]).push(m);});
+  var porOpN=0;
+  var nuevos=built.filter(function(m){
+    var a=(porBase[baseKey(m)]||[]).filter(function(x){return !usado[sigOf(x)];})[0];if(a){usado[sigOf(a)]=1;return false;}
+    var k=opKey(m),b=k&&(porOp[k]||[]).filter(function(x){return !usado[sigOf(x)]&&Math.abs(diasEntre(x.fecha,m.fecha))<=7;})[0];if(b){usado[sigOf(b)]=1;porOpN++;return false;}
+    return true;});
+  PREVIEW={built:built,nuevos:nuevos,porOp:porOpN,saldos:{S:PEND.S,D:PEND.D}};
   renderPreview();
 }
 function renderPreview(){
@@ -1342,6 +1352,7 @@ function renderPreview(){
   var lista=P.nuevos.slice().sort(function(a,b){return a.fecha<b.fecha?1:-1;});
   var h='<div class="card-head"><h2 class="card-title">Vista previa</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><span class="pill neutral">'+P.built.length+' leídos</span><span class="pill ok">'+n+' nuevos</span><span class="pill na">'+(P.built.length-n)+' ya guardados</span></div></div>';
   var nBot=P.nuevos.filter(function(m){return m.bot==='auto';}).length;
+  if(P.porOp)h+='<div class="alert pos">'+ico('shield-check')+'<span>'+P.porOp+(P.porOp===1?' movimiento ya estaba guardado':' movimientos ya estaban guardados')+' aunque el banco le cambió la fecha o la descripción: se reconocieron por el N° de operación y no se duplican.</span></div>';
   if(nBot)h+='<div class="alert pos">'+ico('robot')+'<span>El bot clasificó solo <b>'+nBot+'</b> de '+n+' según cómo se clasificaron antes movimientos parecidos. Quedan marcados como <b>Bot</b> para que los revises.</span></div>';
   if(nRev)h+='<div class="alert warn">'+ico('warning')+'<span>'+nRev+(nRev===1?' movimiento no se pudo clasificar solo y quedará':' movimientos no se pudieron clasificar solos y quedarán')+' en REVISAR.</span></div>';
   if(n){h+='<div class="prevlist">'+lista.slice(0,6).map(function(m){return '<div class="prevrow"><span class="f">'+dmy(m.fecha)+'</span><span class="d">'+esc(m.desc||m.mov)+' <span>'+esc(m.mov)+'</span></span>'+montoHtml(m)+'</div>';}).join('')+'</div>'+(n>6?'<div class="muted3" style="font-size:12.5px;margin-bottom:10px">+ '+(n-6)+' más</div>':'');}
