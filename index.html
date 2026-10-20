@@ -91,7 +91,7 @@ button{cursor:pointer}
 .avatar{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
 .sb-user .mail{color:#fff;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sb-user .rol{color:rgba(255,255,255,.62);font-size:11.5px}
-.sb-drive[hidden],.mdrive[hidden]{display:none!important}.sb-drive{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.72);font-size:13px;text-decoration:none}.sb-drive:hover{color:#fff}.mdrive{display:flex;align-items:center;gap:8px;padding:10px 4px;font-size:14px;color:inherit;text-decoration:none}
+.sb-ver{font-size:10.5px;color:rgba(255,255,255,.4)}.sb-drive[hidden],.mdrive[hidden]{display:none!important}.sb-drive{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.72);font-size:13px;text-decoration:none}.sb-drive:hover{color:#fff}.mdrive{display:flex;align-items:center;gap:8px;padding:10px 4px;font-size:14px;color:inherit;text-decoration:none}
 .sb-user button{display:flex;align-items:center;gap:8px;border:0;background:none;color:rgba(255,255,255,.72);font-size:13px;padding:0}
 .sb-user button:hover{color:#fff}
 .main{margin-left:236px;min-width:0;display:flex;flex-direction:column;min-height:100vh}
@@ -293,6 +293,7 @@ select.input-ghost{appearance:auto}
 .alert.neg{background:var(--gr-neg-bg);color:var(--gr-neg-ink)}
 .alert.warn{background:var(--gr-warn-bg);color:var(--gr-warn-ink)}
 .alert.pos{background:var(--gr-pos-bg);color:var(--gr-pos-ink)}
+.verbar{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:70;display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px;border-radius:12px;background:#0f2233;color:#fff;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.25);max-width:calc(100vw - 32px)}.verbar button{border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:700;padding:7px 12px;cursor:pointer}@media(min-width:900px){.verbar{bottom:24px}}
 .navbadge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#f59e0b;color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}.navbadge.neg{background:#ef4444}.navbadge[hidden]{display:none}
 .sl-list{display:flex;flex-direction:column;gap:10px}.sl-item{border:1px solid var(--gr-border);border-radius:var(--r-md);padding:12px 14px;display:flex;flex-direction:column;gap:10px}.sl-item.neg{border-color:var(--gr-neg-bg);background:color-mix(in srgb,var(--gr-neg-bg) 35%,transparent)}.sl-item.warn{background:color-mix(in srgb,var(--gr-warn-bg) 30%,transparent)}
 .sl-top{display:flex;align-items:flex-start;gap:10px}.sl-item.ok .sl-top>.ph{color:var(--gr-pos)}.sl-item.warn .sl-top>.ph{color:#d97706}.sl-item.neg .sl-top>.ph{color:var(--gr-neg)}.sl-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.sl-t span{font-size:12.5px;color:var(--gr-text-2)}.sl-top .pill{flex-shrink:0;white-space:nowrap}
@@ -670,6 +671,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
       <div class="u"><div class="avatar" id="uAvatar">·</div><div style="display:flex;flex-direction:column;min-width:0"><span class="mail" id="uMail"></span><span class="rol" id="uRol"></span></div></div>
       <a id="driveLink" class="sb-drive" href="#" target="_blank" rel="noopener" hidden><i class="ph ph-google-drive-logo"></i>Historial y respaldo en Drive</a>
       <button id="salir"><i class="ph ph-sign-out"></i>Salir</button>
+      <span class="sb-ver" id="sbVer"></span>
     </div>
   </aside>
 
@@ -774,6 +776,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
 </div>
 <script>
 // ============ Supabase ============
+var APP_VER='2026-10-20.1';
 var SB_URL='https://vhqavbthsdhiwspwidhr.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZocWF2YnRoc2RoaXdzcHdpZGhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MDg1NjMsImV4cCI6MjA5OTI4NDU2M30.MFEHIgt2OPHD71tBs1k7b1TWWFNShP10Bvj3gH4Vvvo';
 // Enlace del correo: invitación o recuperar contraseña (se lee antes de que la librería limpie la dirección)
@@ -2614,6 +2617,19 @@ function destinosHtml(){
     +'<p class="nota">Las salidas en dólares se muestran en soles al TC pagado'+(cm.tc?' ('+cm.tc.toFixed(3)+')':'')+'. El cambio de moneda aparece como salida a la casa de cambio.</p>');
 }
 
+// ============ Mantenimiento: errores de la app y aviso de versión nueva ============
+// Los errores que vea alguien se guardan en app_errores (máx. 10 por sesión) para poder corregirlos.
+var ERR_N=0,ERR_VISTOS={};
+function registrarError(msg,det){try{msg=String(msg||'').slice(0,500);if(!msg||ERR_N>=10||ERR_VISTOS[msg]||!USUARIO||/ResizeObserver|Script error\.?$/i.test(msg))return;ERR_VISTOS[msg]=1;ERR_N++;
+  sb.from('app_errores').insert({version:APP_VER,vista:typeof VISTA!=='undefined'?VISTA:'',mensaje:msg,detalle:String(det||'').slice(0,2000),navegador:navigator.userAgent.slice(0,200)}).then(function(){},function(){});}catch(x){}}
+window.addEventListener('error',function(e){if(e.filename&&e.filename.indexOf(location.host)===-1)return;registrarError(e.message,(e.filename||'')+':'+(e.lineno||'')+':'+(e.colno||'')+' '+(e.error&&e.error.stack||''));});
+window.addEventListener('unhandledrejection',function(e){var r=e.reason;registrarError(r&&r.message||r,r&&r.stack||'');});
+// Si se publicó una versión nueva mientras la app está abierta, avisa para recargar (no recarga sola: no se pierde lo que estás editando)
+var VER_AVISO=false;
+function revisarVersion(){if(VER_AVISO||document.hidden)return;fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.text():'';}).then(function(t){var m=t.match(/var APP_VER='([^']+)'/);
+  if(m&&m[1]!==APP_VER){VER_AVISO=true;var b=document.createElement('div');b.className='verbar';b.innerHTML=ico('arrow-clockwise')+'<span>Hay una versión nueva de la app.</span><button type="button">Actualizar</button>';b.querySelector('button').onclick=function(){location.reload();};document.body.appendChild(b);}}).catch(function(){});}
+setInterval(revisarVersion,15*60*1000);document.addEventListener('visibilitychange',function(){if(!document.hidden)revisarVersion();});
+
 // ============ Bot de mantenimiento: Salud del sistema ============
 // Las revisiones corren en Supabase (salud_sistema) y cada noche se guardan en el Drive. Regla: el saldo del banco manda.
 function esDupMov(m){if(!m.numOp)return false;var ix=memo('dupix',function(){var o={};allMovs().forEach(function(x){if(!x.numOp)return;var k=[x.fecha,x.moneda,x.cargo,x.abono,x.numOp].join('|');o[k]=(o[k]||0)+1;});return o;});return ix[[m.fecha,m.moneda,m.cargo,m.abono,m.numOp].join('|')]>1;}
@@ -3083,6 +3099,7 @@ async function iniciar(){
   ROL=(perf.data&&perf.data.rol)?perf.data.rol:'viewer';
   $('login').style.display='none';$('app').style.display='block';
   aplicarRol();
+  $('sbVer').textContent='Versión '+APP_VER;
   setTimeout(cargarSalud,1500);
   sb.rpc('drive_link').then(function(r){var u=r&&r.data;if(u){['driveLink','driveLinkM'].forEach(function(id){var a=$(id);a.href=u;a.hidden=false;});}});
   try{await cargarNube();}catch(e){setSync('error al cargar');}
