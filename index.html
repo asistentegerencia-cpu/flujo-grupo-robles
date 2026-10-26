@@ -1355,6 +1355,7 @@ function renderPreview(){
   if(P.porOp)h+='<div class="alert pos">'+ico('shield-check')+'<span>'+P.porOp+(P.porOp===1?' movimiento ya estaba guardado':' movimientos ya estaban guardados')+' aunque el banco le cambió la fecha o la descripción: se reconocieron por el N° de operación y no se duplican.</span></div>';
   if(nBot)h+='<div class="alert pos">'+ico('robot')+'<span>El bot clasificó solo <b>'+nBot+'</b> de '+n+' según cómo se clasificaron antes movimientos parecidos. Quedan marcados como <b>Bot</b> para que los revises.</span></div>';
   if(nRev)h+='<div class="alert warn">'+ico('warning')+'<span>'+nRev+(nRev===1?' movimiento no se pudo clasificar solo y quedará':' movimientos no se pudieron clasificar solos y quedarán')+' en REVISAR.</span></div>';
+  if(sd&&sd.omitido)h+='<div class="alert warn">'+ico('info')+'<span>El saldo que trae el archivo ('+(sd.arch.soles!=null?S(sd.arch.soles):'')+(sd.arch.dolares!=null?' · '+U(sd.arch.dolares):'')+') es el del día en que se descargó. Como ya hay meses posteriores a '+esc(mesLargo(sd.ym))+' cargados, <b>no se cambia el saldo de cierre de '+esc(mesLargo(sd.ym))+'</b>. Solo se guardan los movimientos.</span></div>';
   if(n){h+='<div class="prevlist">'+lista.slice(0,6).map(function(m){return '<div class="prevrow"><span class="f">'+dmy(m.fecha)+'</span><span class="d">'+esc(m.desc||m.mov)+' <span>'+esc(m.mov)+'</span></span>'+montoHtml(m)+'</div>';}).join('')+'</div>'+(n>6?'<div class="muted3" style="font-size:12.5px;margin-bottom:10px">+ '+(n-6)+' más</div>':'');}
   else h+='<div class="alert pos" style="margin:10px 0">'+ico('check-circle')+'<span>No hay movimientos nuevos: todo ya estaba guardado.'+(sd&&sd.cambia?' El saldo del banco sí cambió y se puede guardar.':'')+'</span></div>';
   if((n||(sd&&sd.cambia))&&!READONLY)h+='<button class="btn btn-success btn-lg" id="save">'+ico('cloud-arrow-up')+'Guardar en la nube</button>';
@@ -1366,8 +1367,13 @@ function saldoDelArchivo(P){
   var months={};P.built.forEach(function(m){months[ym(m.fecha)]=true;});
   var lastM=Object.keys(months).sort().pop();if(!lastM)return null;
   var prev=DB.saldos[lastM]||{};var o={soles:prev.soles!=null?prev.soles:null,dolares:prev.dolares!=null?prev.dolares:null,tc:prev.tc!=null?prev.tc:null};
-  if(P.saldos.S&&P.saldos.S.saldo!=null)o.soles=P.saldos.S.saldo;
-  if(P.saldos.D&&P.saldos.D.saldo!=null)o.dolares=P.saldos.D.saldo;
+  // El "saldo disponible" del Excel es el saldo del DÍA en que se descargó. Solo vale como cierre del último mes del archivo
+  // si no hay meses posteriores ya cargados (si no, pisaría el cierre de un mes viejo con el saldo de hoy).
+  var posterior=Object.keys(DB.saldos).some(function(k){return k>lastM&&DB.saldos[k]&&DB.saldos[k].soles!=null;})||allMovs().some(function(m){return ym(m.fecha)>lastM;});
+  var arch={soles:P.saldos.S&&P.saldos.S.saldo!=null?P.saldos.S.saldo:null,dolares:P.saldos.D&&P.saldos.D.saldo!=null?P.saldos.D.saldo:null};
+  if(posterior)return {ym:lastM,o:o,cambia:false,omitido:arch.soles!=null||arch.dolares!=null,arch:arch};
+  if(arch.soles!=null)o.soles=arch.soles;
+  if(arch.dolares!=null)o.dolares=arch.dolares;
   return {ym:lastM,o:o,cambia:o.soles!==(prev.soles!=null?prev.soles:null)||o.dolares!==(prev.dolares!=null?prev.dolares:null)};
 }
 async function guardar(){
@@ -1382,7 +1388,7 @@ async function guardar(){
   PREVIEW.nuevos=[];
   // 2) saldo del banco: si falla, los movimientos ya quedaron guardados y el botón permite reintentar solo el saldo
   var sd=saldoDelArchivo(PREVIEW);
-  if(sd){var e2=await upsertSaldo(sd.ym,sd.o);
+  if(sd&&!sd.omitido){var e2=await upsertSaldo(sd.ym,sd.o);
     if(e2){btn.disabled=false;btn.innerHTML=ico('arrow-clockwise')+'Reintentar guardar saldo';buildFilters();
       showErr((n?'Se guardaron '+n+' movimientos nuevos, pero el saldo del banco no: ':'No se guardó el saldo del banco: ')+e2.message+'. Vuelve a tocar el botón (no se duplican movimientos).');return;}
     DB.saldos[sd.ym]=sd.o;}
@@ -1520,7 +1526,8 @@ function siguienteRev(desde){var l=detFiltrados(detBase()).filter(function(m){re
 function panelCambioHtml(m){
   if(m.cambioGrupo)return historialCambioHtml(m.cambioGrupo,sigOf(m))+'<button class="btn btn-secondary" id="pCam" style="align-self:flex-start">'+ico('arrows-left-right')+'Editar el cambio</button>';
   if(esMovCambio(m)||/MUVEX|CASA DE CAMBIO|D[OÓ]LAR/i.test((m.desc||'')+' '+(m.obs||'')))return '<div class="alert warn">'+ico('arrows-left-right')+'<span>'+(esMovCambio(m)?'Es un cambio de moneda pero aún no está enlazado':'Parece una compra o venta de dólares. Si lo es, ármalo como cambio de moneda: no es gasto ni ingreso, y queda enlazado')+(esMovCambio(m)?' ':'')+' con su '+(m.cargo>0?'entrada':'salida')+' en la otra cuenta y los pagos que se hicieron.</span></div><button class="btn btn-primary" id="pCam" style="align-self:flex-start">'+ico('arrows-left-right')+'Armar el cambio</button>';
-  if(m.cargo>0&&m.moneda==='USD'&&m.area!=='BANCO')return '<button class="btn btn-ghost" id="pCam" style="align-self:flex-start;font-size:12.5px">'+ico('arrows-left-right')+'¿Se pagó con dólares comprados? Enlazar a un cambio</button>';
+  if(m.cargo>0&&m.moneda==='USD'&&m.area!=='BANCO')return '<button class="btn btn-ghost" id="pCam" style="align-self:flex-start;font-size:12.5px">'+ico('arrows-left-right')+'¿Se pagó con dólares comprados o recibidos? Enlazar</button>';
+  if(m.abono>0&&m.moneda==='USD'&&m.clas!=='VENTAS'&&m.clas!=='COBRANZA')return '<button class="btn btn-ghost" id="pCam" style="align-self:flex-start;font-size:12.5px">'+ico('arrows-left-right')+'¿Con estos dólares se hicieron pagos? Enlazarlos</button>';
   return '';
 }
 function panelHtml(){
@@ -2099,12 +2106,17 @@ function resumenCambio(ms){
   ms.forEach(function(m){if(!r.fecha||m.fecha<r.fecha)r.fecha=m.fecha;if(m.cambioArea&&!r.area)r.area=m.cambioArea;
     if(tramoCambio(m)){if(m.cargo>0){if(m.moneda==='PEN')r.salePEN+=m.cargo;else r.saleUSD+=m.cargo;}else{if(m.moneda==='USD')r.entraUSD+=m.abono;else r.entraPEN+=m.abono;}}
     else if(m.cargo>0){r.pagado+=m.cargo;r.pagos.push(m);}});
+  // Dólares directos: entran dólares desde otra cuenta (Bayas, Evolution…) sin comprarlos (no salen soles) y con ellos se paga
+  var entUSD=ms.filter(function(m){return m.abono>0&&m.moneda==='USD'&&(tramoCambio(m)||m.clas==='FINANCIAMIENTO'||!m.clas);});
+  if(!r.salePEN&&!r.saleUSD&&!r.entraPEN&&entUSD.length&&!entUSD.some(function(m){return /MUVEX|CASA DE CAMBIO/i.test(m.desc||'');})){
+    r.entraUSD=entUSD.reduce(function(a,m){return a+m.abono;},0);r.compra=true;r.directo=true;r.tc=null;r.libre=r.entraUSD-r.pagado;
+    r.estado=r.libre>1?'directo_por_usar':'directo';return r;}
   r.compra=r.salePEN>0||r.entraUSD>0;
   if(r.compra){r.tc=r.salePEN&&r.entraUSD?r.salePEN/r.entraUSD:null;r.estado=!r.salePEN?'sin_salida':!r.entraUSD?'sin_entrada':r.entraUSD-r.pagado>1?'por_usar':'completo';r.libre=r.entraUSD-r.pagado;}
   else{r.tc=r.saleUSD&&r.entraPEN?r.entraPEN/r.saleUSD:null;r.estado=!r.saleUSD?'sin_salida':!r.entraPEN?'sin_entrada':'completo';r.libre=0;}
   return r;
 }
-var CAMBIO_ESTADO={completo:['ok','Completo'],por_usar:['warn','Dólares por usar'],sin_entrada:['ex','Falta la entrada'],sin_salida:['ex','Falta la salida']};
+var CAMBIO_ESTADO={completo:['ok','Completo'],por_usar:['warn','Dólares por usar'],directo:['ok','Dólares directos'],directo_por_usar:['warn','Dólares directos por usar'],sin_entrada:['ex','Falta la entrada'],sin_salida:['ex','Falta la salida']};
 function historialCambioHtml(g,actual){
   var ms=movsGrupo(g);if(!ms.length)return '';var r=resumenCambio(ms),e=CAMBIO_ESTADO[r.estado];
   var paso=function(m){var u=m.moneda==='USD',amt=u?U(m.cargo||m.abono):S(m.cargo||m.abono),txt;
@@ -2144,7 +2156,7 @@ function abrirEnlaceCambio(sig){
   var w=document.createElement('div');w.id='concModal';w.className='modal-bg';
   w.innerHTML='<div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="cxT"><div class="cm-head"><div><h3 id="cxT">Cambio de moneda</h3><div class="muted" style="font-size:13px;margin-top:4px">Une la salida, la entrada y los pagos hechos con esa moneda</div></div><button class="x" id="cmX" aria-label="Cerrar">'+ico('x')+'</button></div>'
     +'<label class="pfield">Área que pidió el cambio<select id="cxArea"><option value="">—</option>'+CAMBIO_AREAS.map(function(a){return '<option value="'+a+'"'+(area===a?' selected':'')+'>'+esc(areaLabel(a))+'</option>';}).join('')+'</select></label>'
-    +'<div class="cm-sec"><b>Movimientos del cambio</b><span class="muted" style="font-size:12.5px">Marca la salida, la entrada en la otra moneda y los pagos que se hicieron con ella. Los marcados ya vienen sugeridos.</span><div class="candlist" id="cxList"></div><div class="cm-sum" id="cxSum"></div></div>'
+    +'<div class="cm-sec"><b>Movimientos del cambio</b><span class="muted" style="font-size:12.5px">Marca la salida, la entrada en la otra moneda y los pagos que se hicieron con ella. Los marcados ya vienen sugeridos. <b>Si los dólares entraron directo desde otra cuenta</b> (Bayas, Evolution…) sin comprarlos, marca solo esa entrada y los pagos: queda como «Dólares directos» y la entrada cuenta como financiamiento.</span><div class="candlist" id="cxList"></div><div class="cm-sum" id="cxSum"></div></div>'
     +'<div class="cm-foot">'+(m.cambioGrupo?'<button class="btn btn-ghost" id="cxDel">'+ico('link-break')+'Deshacer grupo</button>':'')+'<span class="sp"></span><button class="btn btn-secondary" id="cxCan">Cancelar</button><button class="btn btn-primary" id="cxOk">Guardar</button></div></div>';
   document.body.appendChild(w);
   function lista(){
@@ -2493,11 +2505,14 @@ function wirePend(movsP){
 function cambiosMoneda(enP){
   var ms=allMovs().filter(function(m){return enP(m.fecha)&&esMovCambio(m);}),set={},grupos={},sinPar=[];
   ms.forEach(function(m){set[m.sig]=1;if(m.cambioGrupo)grupos[m.cambioGrupo]=1;else sinPar.push(m);});
-  var S_=0,U_=0,n=0,pagos={};
-  Object.keys(grupos).forEach(function(g){var gm=movsGrupo(g),r=resumenCambio(gm);n++;
+  var S_=0,U_=0,n=0,pagos={},dir={},nDir=0,uDir=0;
+  Object.keys(grupos).forEach(function(g){var gm=movsGrupo(g),r=resumenCambio(gm);
+    // Dólares directos: no es cambio de moneda. La entrada cuenta como financiamiento (o devolución de Dirección) y los pagos como gastos
+    if(r.directo){nDir++;gm.forEach(function(m){if(m.abono>0&&m.moneda==='USD'&&set[m.sig]){delete set[m.sig];dir[m.sig]=1;if(enP(m.fecha))uDir+=m.abono;}});return;}
+    n++;
     if(r.estado==='sin_entrada'||r.estado==='sin_salida')gm.filter(function(m){return esMovCambio(m)&&enP(m.fecha);}).forEach(function(m){sinPar.push(m);});
     else if(r.compra&&r.tc){S_+=r.salePEN;U_+=r.entraUSD;}});
-  return {n:n,sinPar:sinPar,set:set,soles:S_,usd:U_,tc:U_?S_/U_:null,pares:Object.keys(grupos)};
+  return {n:n,sinPar:sinPar,set:set,dir:dir,nDir:nDir,uDir:uDir,soles:S_,usd:U_,tc:U_?S_/U_:null,pares:Object.keys(grupos)};
 }
 // Egresos por área con los dólares al TC realmente pagado en las compras de dólares del periodo
 function areasConTC(movs,cm){
@@ -2509,7 +2524,7 @@ function areasConTC(movs,cm){
 function estadoResultadosHtml(movs){
   var t={ventas:0,cob:0,otrosIng:0,otros:0,fin:0,devGG:0,interno:0},cm=cambiosMoneda(periodoConc());
   movs.forEach(function(m){if(!(m.abono>0)||cm.set[m.sig])return;var s=solesDe(m);
-    if(m.clas==='FINANCIAMIENTO'){if(esDevolucionGG(m))t.devGG+=s;else t.fin+=s;return;}
+    if(m.clas==='FINANCIAMIENTO'||cm.dir[m.sig]){if(esDevolucionGG(m,cm.dir))t.devGG+=s;else t.fin+=s;return;}
     if(m.clas==='VENTAS')t.ventas+=s;else if(m.clas==='COBRANZA')t.cob+=s;else if(m.clas==='OTROS')t.otrosIng+=s;else t.otros+=s;});
   var LV=lotesVentas(movs),nl=LV.ls.length;
   var A=areasConTC(movs,cm),ope=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],otros=['BANCO','DVO','OTROS'];
@@ -2540,12 +2555,12 @@ function estadoResultadosHtml(movs){
     +'<p class="nota">Ventas y cobranza salen de cómo está clasificado cada ingreso en el banco. El precio por m² es lo que entró en el periodo entre los m² del lote. Capitalización Dirección y Evolution van aparte. Los costos fijos ya van repartidos por área.</p></div>';
 }
 // Plata que vuelve de Dirección (Bayas y Frutos / Grupo Inmobiliario) clasificada como financiamiento: se descuenta de la capitalización
-function esDevolucionGG(m){return m.abono>0&&m.clas==='FINANCIAMIENTO'&&(m.area==='DEUDA GG'||/BAYAS Y FRUTOS|GRUPO INMOBILIARIO ROBLES|INMUEBLES ROBLES/.test(cNorm(m.desc)));}
+function esDevolucionGG(m,dir){return m.abono>0&&(m.clas==='FINANCIAMIENTO'||!!(dir&&dir[m.sig]))&&(m.area==='DEUDA GG'||/BAYAS Y FRUTOS|GRUPO INMOBILIARIO ROBLES|INMUEBLES ROBLES/.test(cNorm(m.desc)));}
 // Flujo del periodo para la distribución: base = ventas + cobranza; capitalización neta; cierre con la caja del banco
 function flujoDist(movs){
   var cm=cambiosMoneda(periodoConc()),f={V:0,C:0,otI:0,devGG:0,fin:0,egTot:0,cm:cm};
   movs.forEach(function(m){if(cm.set[m.sig])return;
-    if(m.abono>0){var s=solesDe(m);if(m.clas==='VENTAS')f.V+=s;else if(m.clas==='COBRANZA')f.C+=s;else if(esDevolucionGG(m))f.devGG+=s;else if(m.clas==='FINANCIAMIENTO')f.fin+=s;else f.otI+=s;}
+    if(m.abono>0){var s=solesDe(m);if(m.clas==='VENTAS')f.V+=s;else if(m.clas==='COBRANZA')f.C+=s;else if(esDevolucionGG(m,cm.dir))f.devGG+=s;else if(m.clas==='FINANCIAMIENTO'||cm.dir[m.sig])f.fin+=s;else f.otI+=s;}
     if(m.cargo>0)f.egTot+=m.moneda==='USD'?m.cargo*(cm.tc||tcDe(m)):m.cargo;});
   var A=areasConTC(movs,cm);f.A=A;f.base=f.V+f.C;f.capB=A['DEUDA GG'].eq;f.capN=f.capB-f.devGG;
   f.areas=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'];f.gA=f.areas.reduce(function(a,k){return a+A[k].eq;},0);
