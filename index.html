@@ -1398,9 +1398,15 @@ async function guardar(){
   quitarArchivo('S');quitarArchivo('D');PREVIEW=null;
   buildFilters();
 }
+// ¿El mes cuadra con el banco? (saldo inicial + entradas − salidas = saldo final, en soles y en dólares)
+function mesCuadra(y){var s1=DB.saldos[y],s0=DB.saldos[ymPrev(y)];if(!s1||!s0||s1.soles==null||s0.soles==null)return false;var p=0,u=0;
+  allMovs().forEach(function(m){if(m.fecha.slice(0,7)!==y)return;var v=(m.abono||0)-(m.cargo||0);if(m.moneda==='USD')u+=v;else p+=v;});
+  return Math.abs(s0.soles+p-s1.soles)<0.01&&Math.abs((+s0.dolares||0)+u-(+s1.dolares||0))<0.01;}
 async function deleteMov(sig){
   if(READONLY)return;
-  if(!confirm('¿Eliminar este movimiento? Esta acción no se puede deshacer.'))return;
+  var mm=DB.movs[sig];
+  if(mm&&mesCuadra(ym(mm.fecha))){if(!confirm('⚠️ '+mesLargo(ym(mm.fecha))+' CUADRA con el banco al centavo.\n\nSi eliminas este movimiento, el mes dejará de cuadrar. Dos pagos con el mismo monto y N° de operación pueden ser reales (el banco a veces repite el número).\n\n¿Eliminar de todas formas?'))return;}
+  else if(!confirm('¿Eliminar este movimiento? Esta acción no se puede deshacer.'))return;
   setSync('eliminando…');
   var r=await sb.from('movimientos').delete().eq('sig',sig);
   if(r.error){setSync('error: '+r.error.message);alert('No se eliminó: '+r.error.message);return;}
@@ -2659,7 +2665,8 @@ setInterval(revisarVersion,15*60*1000);document.addEventListener('visibilitychan
 
 // ============ Bot de mantenimiento: Salud del sistema ============
 // Las revisiones corren en Supabase (salud_sistema) y cada noche se guardan en el Drive. Regla: el saldo del banco manda.
-function esDupMov(m){if(!m.numOp)return false;var ix=memo('dupix',function(){var o={};allMovs().forEach(function(x){if(!x.numOp)return;var k=[x.fecha,x.moneda,x.cargo,x.abono,x.numOp].join('|');o[k]=(o[k]||0)+1;});return o;});return ix[[m.fecha,m.moneda,m.cargo,m.abono,m.numOp].join('|')]>1;}
+// Posible duplicado: misma fecha, monto y N° de operación, SOLO si su mes no cuadra con el banco (si cuadra, los dos son reales)
+function esDupMov(m){if(!m.numOp)return false;if(memo('cuadra|'+ym(m.fecha),function(){return mesCuadra(ym(m.fecha));}))return false;var ix=memo('dupix',function(){var o={};allMovs().forEach(function(x){if(!x.numOp)return;var k=[x.fecha,x.moneda,x.cargo,x.abono,x.numOp].join('|');o[k]=(o[k]||0)+1;});return o;});return ix[[m.fecha,m.moneda,m.cargo,m.abono,m.numOp].join('|')]>1;}
 var FILTRO_SALUD={
   ingsin:['Ingresos sin clasificar',function(m){return m.abono>0&&!m.clas&&m.area!=='REVISAR';}],
   sinlote:['Sin lote',function(m){return esVentaCob(m)&&!m.lote&&!(m.repLotes&&m.repLotes.length)&&cuotaParse(m.cuota).k!=='DESIST';}],
