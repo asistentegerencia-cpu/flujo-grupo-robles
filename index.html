@@ -266,6 +266,7 @@ select.input-ghost{appearance:auto}
 .search input:focus{background:#fff;border-color:var(--gr-action);outline:none}
 .seg{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:var(--gr-brand-100)}
 .seg button{border:0;background:transparent;padding:8px 14px;border-radius:9px;font-size:13px;font-weight:700;color:var(--gr-brand)}
+#cacSeg button{display:inline-flex;align-items:center;gap:6px}
 .seg button.on{background:#fff;color:var(--gr-text);box-shadow:var(--sh-1)}
 
 /* ---------- Detalle de movimientos + panel ---------- */
@@ -778,7 +779,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
 </div>
 <script>
 // ============ Supabase ============
-var APP_VER='2026-10-29.2';
+var APP_VER='2026-10-29.3';
 var SB_URL='https://vhqavbthsdhiwspwidhr.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZocWF2YnRoc2RoaXdzcHdpZGhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MDg1NjMsImV4cCI6MjA5OTI4NDU2M30.MFEHIgt2OPHD71tBs1k7b1TWWFNShP10Bvj3gH4Vvvo';
 // Enlace del correo: invitación o recuperar contraseña (se lee antes de que la librería limpie la dirección)
@@ -1830,10 +1831,49 @@ function leyendaRPAHtml(){
   var filas=[['ok','Excelente','1:15 a 1:20','Mantener. Modelo replicable. Candidato a bonificación y promoción.'],['ok','Bueno','1:13 a 1:15','Mantener monitoreo. Objetivo estándar saludable.'],['warn','Alerta','1:12 a 1:13','Auditoría inmediata. Asesor en fase de observación.'],['ex','Crítico','1:11 a 1:12','Auditoría y cambios. Dar 15 días para elevar métricas.'],['ex','Inaceptable','< 1:11','Retiro inmediato o cambio de rol. No genera ROI.']];
   return '<div style="font-weight:700;margin:16px 0 8px">Matriz RPA · Ventas ÷ Costo operativo del asesor</div><table class="table cards"><thead><tr><th>Clasificación</th><th>Ratio</th><th>Acción requerida</th></tr></thead><tbody>'+filas.map(function(f){return '<tr><td data-l="Clasificación"><span class="pill '+f[0]+'">'+f[1]+'</span></td><td data-l="Ratio" class="nowrap">'+f[2]+'</td><td data-l="Acción">'+f[3]+'</td></tr>';}).join('')+'</tbody></table>';
 }
+// ============ CAC de Marketing ============
+// Gasto directo del área MKT (sin costos fijos repartidos) contra las ventas nuevas confirmadas del mes (las mismas de Conciliación)
+var CACVIEW='asesores';
+function mktMes(y){return memo('mkt|'+y,function(){
+  var ms=movsDe(y),g=0,pub=0,porTipo={};
+  ms.forEach(function(m){if(!(m.cargo>0)||m.area!=='MKT'||m.esFijo)return;var v=montoPEN(m,true),t=m.concepto||'Sin tipo';g+=v;porTipo[t]=(porTipo[t]||0)+v;if(/^Publicidad/.test(t))pub+=v;});
+  var ym0=CV.ym;CV.ym=y;var LV=lotesVentas(allMovs().filter(function(m){return m.fecha.slice(0,7)===y;}));CV.ym=ym0;
+  var n=LV.ls.length,m2=LV.ls.reduce(function(a,x){return a+(+x.m2||0);},0),seps=LV.seps.length;
+  var vent=ms.filter(function(m){return m.abono>0&&m.clas==='VENTAS';}).reduce(function(a,m){return a+montoPEN(m,false);},0);
+  return {y:y,gasto:g,pub:pub,porTipo:porTipo,n:n,m2:m2,seps:seps,ventas:vent,cac:n?g/n:null,cacPub:n?pub/n:null,m2c:m2?g/m2:null,roas:g?vent/g:null};});}
+function renderCACMkt(){
+  var f=F(),box=$('cacBody'),y=f.ym,anio=(y||'').slice(0,4);if(!y){box.innerHTML='<div class="card">'+emptyHtml('megaphone','Elige un mes','')+'</div>';return;}
+  var M=mktMes(y),meses=[];for(var i=1;i<=12;i++){var yy=anio+'-'+('0'+i).slice(-2);if(movsDe(yy).length)meses.push(yy);}
+  var A=meses.map(mktMes),conCac=A.filter(function(x){return x.cac!=null;}),prom=conCac.length?conCac.reduce(function(a,x){return a+x.gasto;},0)/Math.max(1,conCac.reduce(function(a,x){return a+x.n;},0)):null;
+  function sem(c){if(c==null||prom==null)return ['na','—'];return c<=prom?['ok','Mejor que el promedio']:c<=prom*1.5?['warn','Algo alto']:['ex','Muy alto'];}
+  var se=sem(M.cac);
+  var kp='<div class="kpis4">'
+    +kpiCard('Gasto de Marketing',S(M.gasto),mesLargo(y)+(M.pub?' · publicidad pagada '+S(M.pub):''),{vcls:'neg'})
+    +kpiCard('Ventas nuevas',M.n+(M.n===1?' lote':' lotes'),(M.m2?nf(M.m2)+' m² · ':'')+M.seps+(M.seps===1?' separación':' separaciones')+' en curso')
+    +kpiCard('CAC de Marketing',M.cac!=null?S(M.cac):'—',M.cac!=null?'por cada venta nueva'+(prom!=null?' · promedio '+anio+': '+S(prom):''):'sin ventas nuevas este mes',{cls:'kpi-hero',extra:M.cac!=null?'<span class="pill '+se[0]+'" style="align-self:flex-start">'+se[1]+'</span>':''})
+    +kpiCard('ROAS',M.roas!=null?M.roas.toFixed(1)+'×':'—',M.roas!=null?'cada S/ 1 en marketing trajo '+S(M.roas)+' en ventas':'',{vcls:M.roas!=null&&M.roas>=1?'pos':'neg'})+'</div>';
+  var tipos=Object.keys(M.porTipo).sort(function(a,b){return M.porTipo[b]-M.porTipo[a];});
+  var desg='<div class="card"><div class="card-head"><div><h2 class="card-title">¿En qué se gastó?</h2><div class="card-sub">'+mesLargo(y)+' · '+NOTA_USD+'</div></div></div>'
+    +(tipos.length?rankList(tipos.map(function(t){return {l:t,v:M.porTipo[t]};}),function(){return AREA_COLOR['MKT']||'#ec4899';},M.gasto):emptyHtml('megaphone','Sin gasto de Marketing este mes',''))
+    +(M.porTipo['Sin tipo']&&M.gasto&&M.porTipo['Sin tipo']/M.gasto>0.3?'<p class="nota">Ponerle <b>tipo de egreso</b> a los gastos de Marketing en Movimientos (publicidad, agencia, producción…) hace este cuadro más útil.</p>':'')+'</div>';
+  var mx=Math.max.apply(null,A.map(function(x){return x.cac||0;}).concat([1]));
+  var tabla='<div class="card"><div class="card-head"><div><h2 class="card-title">Marketing mes a mes · '+anio+'</h2><div class="card-sub">CAC = gasto de Marketing ÷ ventas nuevas · ROAS = ventas del mes ÷ gasto de Marketing</div></div></div>'
+    +'<div class="tablewrap"><table class="table cards"><thead><tr><th>Mes</th><th class="num">Gasto MKT</th><th class="num">Publicidad</th><th class="num">Ventas nuevas</th><th class="num">CAC MKT</th><th class="num">Costo por m²</th><th class="num">ROAS</th></tr></thead><tbody>'
+    +A.map(function(x){var s2=sem(x.cac);return '<tr'+(x.y===y?' class="sel"':'')+'><td class="full"><b>'+esc(mesLargo(x.y))+'</b></td><td class="num" data-l="Gasto MKT">'+S(x.gasto)+'</td><td class="num" data-l="Publicidad">'+(x.pub?S(x.pub):'—')+'</td>'
+      +'<td class="num" data-l="Ventas nuevas">'+x.n+(x.m2?'<div class="sub">'+nf(x.m2)+' m²</div>':'')+'</td>'
+      +'<td class="num" data-l="CAC MKT">'+(x.cac!=null?'<div style="display:flex;align-items:center;gap:8px;justify-content:flex-end"><div class="track" style="width:70px"><div class="fill" style="width:'+(x.cac/mx*100).toFixed(0)+'%;background:var(--gr-neg)"></div></div><b>'+S(x.cac)+'</b></div><span class="pill '+s2[0]+'" style="font-size:10.5px">'+s2[1]+'</span>':'<span class="muted3">sin ventas</span>')+'</td>'
+      +'<td class="num" data-l="Costo por m²">'+(x.m2c!=null?S(x.m2c):'—')+'</td><td class="num" data-l="ROAS">'+(x.roas!=null?x.roas.toFixed(1)+'×':'—')+'</td></tr>';}).join('')
+    +'</tbody></table></div>'
+    +'<p class="nota">Solo gasto directo del área Marketing: no incluye costos fijos repartidos ni sueldos de Ventas. Las ventas nuevas son las ventas confirmadas del mes (las mismas de Conciliación). Para medir el costo por lead o por cita hacen falta los datos de Meta/Kommo; se pueden sumar más adelante.</p></div>';
+  box.innerHTML=cacSegHtml()+'<div class="sec-title">'+ico('megaphone')+'CAC de Marketing</div>'+kp+desg+tabla;wireCacSeg();
+}
+function cacSegHtml(){return '<div class="seg" id="cacSeg" style="align-self:flex-start"><button data-cv="asesores"'+(CACVIEW==='asesores'?' class="on"':'')+'>'+ico('users')+'Por asesor</button><button data-cv="mkt"'+(CACVIEW==='mkt'?' class="on"':'')+'>'+ico('megaphone')+'Marketing</button></div>';}
+function wireCacSeg(){Array.prototype.forEach.call(document.querySelectorAll('#cacSeg button'),function(b){b.onclick=function(){CACVIEW=b.dataset.cv;renderCAC();};});}
 function renderCAC(){
+  if(CACVIEW==='mkt')return renderCACMkt();
   var f=F(),box=$('cacBody');
   var d=f.rango?calcularCACRango(f.d,f.h):calcularCAC(f.ym);
-  if(!d.rows.length){box.innerHTML='<div class="card">'+emptyHtml('target','No hay datos para calcular el CAC en este período','Agrega el personal de Ventas y clasifica ventas y egresos en Movimientos.','dash')+'</div>';return;}
+  if(!d.rows.length){box.innerHTML=cacSegHtml()+'<div class="card">'+emptyHtml('target','No hay datos para calcular el CAC en este período','Agrega el personal de Ventas y clasifica ventas y egresos en Movimientos.','dash')+'</div>';wireCacSeg();return;}
   var enRiesgo=d.rows.filter(function(r){return r.clas==='critica'||r.clas==='riesgo';}).length;
   var kpis='<div class="kpis3 kpis-cac">'
     +kpiCard('% CAC sobre venta','<span style="font-size:36px">'+d.pctCacIntegral.toFixed(1)+'%</span>','Montos en dólares convertidos a soles con el TC de cada mes',{extra:enRiesgo?'<span class="pill warn" style="align-self:flex-start">'+enRiesgo+' de '+d.rows.length+' asesores en Crítica o Riesgo</span>':'<span class="pill ok" style="align-self:flex-start">'+ico('check')+'Ningún asesor en Crítica o Riesgo</span>'})
@@ -1868,7 +1908,7 @@ function renderCAC(){
       return '<tr><td class="full"><span class="muted3" style="margin-right:8px">'+(i+1)+'</span><b>'+esc(r.asesor)+'</b></td><td data-l="Rentabilidad"><div style="display:flex;align-items:center;gap:10px;min-width:180px"><div class="track"><div class="fill" style="width:'+(Math.abs(r.rentabilidad)/maxA*100).toFixed(1)+'%;background:'+(pos?'var(--gr-pos)':'var(--gr-neg)')+'"></div></div><b class="'+(pos?'pos':'neg')+' nowrap">'+S(r.rentabilidad)+'</b></div></td>'
         +'<td class="num" data-l="Ingreso">'+S(r.ingreso)+'</td><td class="num" data-l="CAC total">'+S(r.cacTotal)+'</td><td class="num" data-l="%">'+(r.ingreso?p.toFixed(1)+'%':'—')+'</td><td class="num" data-l="Ratio">'+(r.cacTotal?'1 : '+r.ratioRPA.toFixed(1):'—')+'</td><td data-l="Tasa sana"><span class="pill '+RPA_PILL[r.ratioClas]+'">'+RATIO_RPA_LABEL[r.ratioClas]+'</span></td></tr>';}).join('')
     +'</tbody></table></div></div>';
-  box.innerHTML='<div class="sec-title">'+ico('target')+'CAC — costo de adquisición</div>'+kpis+'<div class="grid-cac">'+pares+tabla+'</div>'+rpa;
+  box.innerHTML=cacSegHtml()+'<div class="sec-title">'+ico('target')+'CAC — costo de adquisición</div>'+kpis+'<div class="grid-cac">'+pares+tabla+'</div>'+rpa;wireCacSeg();
 }
 
 // ============ COSTOS FIJOS ============
