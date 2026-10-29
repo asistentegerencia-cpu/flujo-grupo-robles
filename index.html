@@ -779,7 +779,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
 </div>
 <script>
 // ============ Supabase ============
-var APP_VER='2026-10-29.3';
+var APP_VER='2026-10-29.4';
 var SB_URL='https://vhqavbthsdhiwspwidhr.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZocWF2YnRoc2RoaXdzcHdpZGhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MDg1NjMsImV4cCI6MjA5OTI4NDU2M30.MFEHIgt2OPHD71tBs1k7b1TWWFNShP10Bvj3gH4Vvvo';
 // Enlace del correo: invitación o recuperar contraseña (se lee antes de que la librería limpie la dirección)
@@ -1783,11 +1783,45 @@ function renderVentas(){
           +'<td data-l="Observación"><input class="input-ghost obsonly" data-sig="'+se+'" value="'+esc(m.obs||'')+'" placeholder="—"'+dis+'></td>'+delCell(se)+'</tr>';}).join('')
       +'</tbody></table></div></div>';
   }else det='<div class="card">'+emptyHtml('chart-line-up','No hay ventas en este período','En Movimientos, abre un ingreso y ponle Clasificación = Ventas.','dash')+'</div>';
-  box.innerHTML=hero+'<div class="grid2">'+rankCard+concCard+'</div>'+det;
+  box.innerHTML=hero+'<div class="grid2">'+rankCard+concCard+'</div>'+ventasIndicadoresHtml(m2L,f.ym)+det;
+  if(!LT.contratos&&!LT.cargando)ltCargar().then(function(){if(VISTA==='ventas')renderActual();});
   var pd=$('persDet');if(pd)pd.ontoggle=function(){PERS_OPEN=pd.open;};
   wireAsesorMgmt(f.rango?'':f.ym);
   wireExtraCampos('ventasDetBody');
   var mb=$('saveMeta');if(mb)mb.onclick=function(){guardarMeta(f.ym,+$('metaSoles').value||0,0).then(function(){toast('Meta guardada');renderActual();});};
+}
+
+// ============ Ventas: indicadores por asesor, conversión de separaciones y proyectos ============
+// Precio del contrato en Evolta (en soles al TC del mes de la venta) para un lote
+function contratoLote(etapa,lote){if(!LT.contratos||!lote)return null;var ix=LT._ctl||(LT._ctl=(function(){var o={};LT.contratos.forEach(function(c){String(c.lotes||'').split('+').forEach(function(l){o[c.etapaN+'|'+ltNom(l)]=c;o['?|'+ltNom(l)]=o['?|'+ltNom(l)]||c;});});return o;})());
+  var l=String(lote).split('+')[0];return ix[(etapa?ltEtapa(etapa):'?')+'|'+ltNom(l)]||ix['?|'+ltNom(l)]||null;}
+function ventasIndicadoresHtml(m2L,ymSel){
+  var anio=(ymSel||'').slice(0,4);
+  // 1) Indicadores por asesor (lotes nuevos del período): ticket y precio por m² según el contrato de Evolta
+  var A={};m2L.forEach(function(x){var k=x.asesor||'Sin asignar',a=A[k]=A[k]||{n:0,m2:0,precio:0,m2p:0,np:0};a.n++;a.m2+=x.m2;
+    var c=contratoLote(x.etapa,x.lote);if(c&&c.precio){var p=c.precio*((/US|\$/i.test(c.moneda||''))?getTC(ym(x.fecha)):1);a.precio+=p;a.np++;a.m2p+=x.m2;}});
+  var ks=Object.keys(A).sort(function(a,b){return A[b].m2-A[a].m2;});
+  var ind='<div class="card"><div class="card-head"><div><h2 class="card-title">Indicadores por asesor</h2><div class="card-sub">Lotes nuevos del período · ticket y precio por m² según el contrato en Evolta (dólares al TC del mes)</div></div></div>'
+    +(ks.length?'<div class="tablewrap"><table class="table cards"><thead><tr><th>Asesor</th><th class="num">Lotes nuevos</th><th class="num">M²</th><th class="num">Ticket promedio</th><th class="num">Precio por m²</th></tr></thead><tbody>'
+      +ks.map(function(k){var a=A[k];return '<tr><td class="full"><b>'+esc(k)+'</b></td><td class="num" data-l="Lotes nuevos">'+a.n+'</td><td class="num" data-l="M²">'+nf(a.m2)+'</td><td class="num" data-l="Ticket promedio">'+(a.np?S(a.precio/a.np):'<span class="muted3">'+(LT.contratos?'sin contrato':'cargando…')+'</span>')+'</td><td class="num" data-l="Precio por m²">'+(a.m2p?S(a.precio/a.m2p):'—')+'</td></tr>';}).join('')
+      +'</tbody></table></div>':emptyHtml('chart-line-up','Sin lotes nuevos en este período',''))+'</div>';
+  // 2) Conversión de separaciones del año, por asesor
+  var C={};allMovs().forEach(function(m){if(!(m.abono>0)||m.clas!=='VENTAS'||m.fecha.slice(0,4)!==anio)return;var k0=cuotaParse(m.cuota).k;if(k0!=='SEP'&&k0!=='DESIST')return;
+    var e=sepEstado(m);if(!e)return;var k=m.asesor||'Sin asignar',c=C[k]=C[k]||{n:0,conv:0,pend:0,des:0,sl:0,dias:0};c.n++;
+    if(e.k==='conv'){c.conv++;c.dias+=diasEntre(m.fecha,e.fecha);}else if(e.k==='pend')c.pend++;else if(e.k==='desist')c.des++;else c.sl++;});
+  var kc=Object.keys(C).sort(function(a,b){return C[b].n-C[a].n;}),T={n:0,conv:0,pend:0,des:0,sl:0};kc.forEach(function(k){['n','conv','pend','des','sl'].forEach(function(f){T[f]+=C[k][f];});});
+  function pct(a,b){return b?(a/b*100).toFixed(0)+'%':'—';}
+  var conv='<div class="card"><div class="card-head"><div><h2 class="card-title">Conversión de separaciones · '+anio+'</h2><div class="card-sub">De cada separación: ¿se convirtió en venta, sigue pendiente o desistió? · '+T.n+' separaciones en el año, '+pct(T.conv,T.n)+' convertidas</div></div></div>'
+    +(kc.length?'<div class="tablewrap"><table class="table cards"><thead><tr><th>Asesor</th><th class="num">Separaciones</th><th class="num">Se convirtieron</th><th class="num">Pendientes</th><th class="num">Desistieron</th><th class="num">Sin lote</th><th class="num">% conversión</th><th class="num">Días a la venta</th></tr></thead><tbody>'
+      +kc.map(function(k){var c=C[k],p=c.n?c.conv/c.n*100:0;return '<tr><td class="full"><b>'+esc(k)+'</b></td><td class="num" data-l="Separaciones">'+c.n+'</td><td class="num pos" data-l="Se convirtieron">'+c.conv+'</td><td class="num" data-l="Pendientes">'+c.pend+'</td><td class="num neg" data-l="Desistieron">'+c.des+'</td><td class="num muted" data-l="Sin lote">'+c.sl+'</td>'
+        +'<td class="num" data-l="% conversión"><span class="pill '+(p>=60?'ok':p>=35?'warn':'ex')+'">'+pct(c.conv,c.n)+'</span></td><td class="num" data-l="Días a la venta">'+(c.conv?Math.round(c.dias/c.conv)+' d':'—')+'</td></tr>';}).join('')
+      +'</tbody></table></div><p class="nota">«Se convirtió» = el lote tuvo otro pago después de la separación. «Sin lote» = la separación no tiene lote anotado, así que no se puede saber si compró.</p>':emptyHtml('handshake','Sin separaciones en '+anio,''))+'</div>';
+  // 3) Ventas por proyecto mes a mes (m² de lotes nuevos)
+  var present=[],P={};for(var i=1;i<=12;i++){var y=anio+'-'+('0'+i).slice(-2),ms=movsDe(y).filter(function(m){return m.clas==='VENTAS'&&esIngreso(m);});if(!ms.length)continue;present.push(i);P[i]={Palta:0,Pitahaya:0,Otro:0};
+    m2PorLote(ms).forEach(function(x){var pr=x.proyecto==='Palta'||x.proyecto==='Pitahaya'?x.proyecto:'Otro';P[i][pr]+=x.m2;});}
+  var proy=present.length?'<div class="card"><div class="card-head"><div><h2 class="card-title">M² vendidos por proyecto · '+anio+'</h2><div class="card-sub">Lotes nuevos de cada mes</div></div>'+legendHtml([['Palta','#84cc16'],['Pitahaya','#ec4899'],['Sin proyecto','#94a3b8']])+'</div>'
+    +barsChart(present,[{get:function(mn){return P[mn].Palta;},color:'#84cc16',label:'Palta'},{get:function(mn){return P[mn].Pitahaya;},color:'#ec4899',label:'Pitahaya'},{get:function(mn){return P[mn].Otro;},color:'#94a3b8',label:'Sin proyecto'}])+'</div>':'';
+  return ind+conv+proy;
 }
 
 // ============ COBRANZA ============
@@ -2829,7 +2863,7 @@ async function ltCargar(){
   if(LT.cargando)return;LT.cargando=true;LT.error='';
   try{
     var both=await Promise.all([ltTodo('evolta_stock'),ltTodo('evolta_contratos'),ltTodo('evolta_pagos').catch(function(){return [];})]),st=both[0],ct=both[1];
-    LT._pDia=null;LT.pagos=both[2].map(function(p){return {fecha:p.fecha,monto:+p.monto||0,etapa:p.etapa||'',lote:p.lote||'',titular:p.titular||'',tipos:p.tipos||'',nop:String(p.nro_op||''),oc:p.oc||''};});
+    LT._pDia=null;LT._ctl=null;LT.pagos=both[2].map(function(p){return {fecha:p.fecha,monto:+p.monto||0,etapa:p.etapa||'',lote:p.lote||'',titular:p.titular||'',tipos:p.tipos||'',nop:String(p.nro_op||''),oc:p.oc||''};});
     LT.stock=st.map(function(x){return {etapa:ltEtapa(x.etapa),lote:x.lote,m2:x.m2!=null?+x.m2:null,precio:x.precio!=null?+x.precio:null,moneda:x.moneda||'PEN',estado:x.estado||''};});
     LT.contratos=ct.map(function(c){['precio','pagado','saldo','ci_total','ci_cobrada','sf_total','sf_cobrada'].forEach(function(k){c[k]=c[k]!=null?+c[k]:null;});c.etapaN=ltEtapa(c.etapa);return c;});
   }catch(e){LT.error=e.message||String(e);}
@@ -3024,7 +3058,7 @@ function m2PorLote(movs){
   var dentro={},pri={},parts={},proy={},ase={};movs.forEach(function(m){dentro[m.sig]=1;});
   allMovs().forEach(function(m){if(!esVentaCob(m))return;partesMov(m).forEach(function(p){var k=ventaKey(p);if(!k)return;
     (parts[k]=parts[k]||[]).push(p);if(!pri[k]||m.fecha<pri[k].fecha)pri[k]=m;if(m.proyecto&&!proy[k])proy[k]=m.proyecto;if(m.asesor&&!ase[k])ase[k]=m.asesor;});});
-  return Object.keys(pri).filter(function(k){return dentro[pri[k].sig];}).map(function(k){var m=pri[k];return {k:k,m2:m2DeGrupo(parts[k]),proyecto:m.proyecto||proy[k]||'',asesor:m.asesor||ase[k]||''};}).filter(function(x){return x.m2>0;});
+  return Object.keys(pri).filter(function(k){return dentro[pri[k].sig];}).map(function(k){var m=pri[k];var pl=parts[k].filter(function(p){return p.lote;})[0]||{};return {k:k,m2:m2DeGrupo(parts[k]),proyecto:m.proyecto||proy[k]||'',asesor:m.asesor||ase[k]||'',lote:pl.lote||'',etapa:pl.etapa||'',fecha:m.fecha};}).filter(function(x){return x.m2>0;});
 }
 // Lote en las tablas: se muestra con su etapa; se edita en Movimientos (buscador de lotes de Evolta)
 function loteCelda(m,se){var t=m.lote?m.lote+(m.etapa&&!(m.repLotes&&m.repLotes.length>1)?' · '+etapaCorta(m.etapa):''):'';
