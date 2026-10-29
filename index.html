@@ -777,7 +777,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
 </div>
 <script>
 // ============ Supabase ============
-var APP_VER='2026-10-20.3';
+var APP_VER='2026-10-29.1';
 var SB_URL='https://vhqavbthsdhiwspwidhr.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZocWF2YnRoc2RoaXdzcHdpZGhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MDg1NjMsImV4cCI6MjA5OTI4NDU2M30.MFEHIgt2OPHD71tBs1k7b1TWWFNShP10Bvj3gH4Vvvo';
 // Enlace del correo: invitación o recuperar contraseña (se lee antes de que la librería limpie la dirección)
@@ -910,10 +910,13 @@ function botIndex(){return memo('bot',function(){var ix={};allMovs().forEach(fun
 // alta (se aplica solo) = egreso con descripción clara, al menos 2 parecidos y los 3 últimos clasificados igual: acierta 97% con los datos reales.
 // En ingresos solo sugiere: la descripción no basta para saber si es venta o cobranza.
 function botSugerir(m){var me=sigOf(m),l=(botIndex()[botKey(m)]||[]).filter(function(p){return sigOf(p)!==me;});if(!l.length)return null;
-  var u=l.slice(0,3),t0=botTup(u[0]),letras=botKey(m).replace(/[^A-Z]/g,'').length-1,alta=!esIngreso(m)&&letras>=6&&l.length>=2&&u.every(function(p){return botTup(p)===t0;});
+  var u=l.slice(0,3),t0=botTup(u[0]),letras=botKey(m).replace(/[^A-Z]/g,'').length-1,alta=!esIngreso(m)&&letras>=6&&!botGenerico(m)&&l.length>=2&&u.every(function(p){return botTup(p)===t0;});
   var cnt={};l.slice(0,6).forEach(function(p){var t=botTup(p);cnt[t]=(cnt[t]||0)+1;});
   var best=alta?t0:Object.keys(cnt).sort(function(a,b){return cnt[b]-cnt[a];})[0];
   return {alta:alta,ej:l.filter(function(p){return botTup(p)===best;})[0],n:l.length,iguales:cnt[best]||0,de:Math.min(l.length,6)};}
+// Descripción genérica (p. ej. "N/D I-BANC + COM.O/C · I-BANC"): no dice a quién se pagó, así que el bot solo sugiere
+var BOT_GENERICAS=/^(N|D|I|BANC|IBANC|COM|O|C|TRANSF|TRANSFERENCIA|CARGO|ABONO|OPERACION|PAGO|TRAN|TIL|INTERNO|BBV|BCP|SCO|COF|DE|DEL|A|EL|LA|LOS|Y|POR|#|INTERBANCARIA|INTERBANC|OB|ND)$/;
+function botGenerico(m){return botKey(m).slice(2).split(' ').filter(function(w){return w&&!BOT_GENERICAS.test(w);}).join('').replace(/[^A-Z]/g,'').length<3;}
 function botAplicar(m,ej){m.area=ej.area;
   if(esIngreso(m)){m.clas=ej.clas||'';}
   else{m.concepto=ej.concepto||'';m.personal=ej.personal||'';m.esFijo=!!ej.esFijo;m.reparto=ej.esFijo?(ej.reparto||''):'';m.proyecto=ej.proyecto||'';}}
@@ -1729,21 +1732,23 @@ function renderVentas(){
   var f=F(),movs=movsFiltro().filter(function(m){return m.clas==='VENTAS'&&esIngreso(m);}),box=$('ventasBody');
   var t=totales(movs),totM2=0,m2P=0,m2T=0,m2L=m2PorLote(movs);
   m2L.forEach(function(x){totM2+=x.m2;if(x.proyecto==='Palta')m2P+=x.m2;else if(x.proyecto==='Pitahaya')m2T+=x.m2;});
-  var byAs={};movs.forEach(function(m){var k=m.asesor||'Sin asignar';byAs[k]=byAs[k]||{s:0,m2:0};if(m.moneda!=='USD')byAs[k].s+=m.abono;});
-  m2L.forEach(function(x){var k=x.asesor||'Sin asignar';byAs[k]=byAs[k]||{s:0,m2:0};byAs[k].m2+=x.m2;});
-  var rank=Object.keys(byAs).map(function(k){return {a:k,v:byAs[k].s,m2:byAs[k].m2};}).sort(function(x,y){return y.v-x.v;});
+  // Ventas en soles equivalentes: los dólares se suman al TC del mes (como en Consolidado y CAC)
+  var totEq=movs.reduce(function(a,m){return a+montoPEN(m,false);},0);
+  var byAs={};movs.forEach(function(m){var k=m.asesor||'Sin asignar';byAs[k]=byAs[k]||{s:0,m2:0,u:0};byAs[k].s+=montoPEN(m,false);if(m.moneda==='USD')byAs[k].u+=m.abono;});
+  m2L.forEach(function(x){var k=x.asesor||'Sin asignar';byAs[k]=byAs[k]||{s:0,m2:0,u:0};byAs[k].m2+=x.m2;});
+  var rank=Object.keys(byAs).map(function(k){return {a:k,v:byAs[k].s,m2:byAs[k].m2,u:byAs[k].u};}).sort(function(x,y){return y.v-x.v;});
   var maxR=rank.length?Math.max.apply(null,rank.map(function(r){return r.v;}))||1:1;
   var meta=DB.metas[f.ym]||{metaSoles:0,metaM2:0};
   var nAct=DB.asesores.filter(function(a){return areaDe(a)==='Ventas'&&activoEnMes(a,f.ym);}).length||1;
-  var metaTot=meta.metaSoles*nAct,av=metaTot?Math.min(t.ingS/metaTot*100,100):0,faltan=metaTot-t.ingS;
+  var metaTot=meta.metaSoles*nAct,av=metaTot?Math.min(totEq/metaTot*100,100):0,faltan=metaTot-totEq;
   var mp=DB.metasPersonal[f.ym]||{},mtP=0,mtT=0;
   DB.asesores.forEach(function(a){if(areaDe(a)==='Ventas'&&activoEnMes(a,f.ym)){var x=mp[a.nombre];if(x){mtP+=(+x.palta||0);mtT+=(+x.pitahaya||0);}}});
   var avP=mtP?Math.min(m2P/mtP*100,100):0,avT=mtT?Math.min(m2T/mtT*100,100):0;
   var metaCard='<div class="card kpi"><div class="kpi-label">'+ico('flag-checkered','font-size:15px')+'Meta del mes · en soles</div>'
-    +'<div class="kpi-value xl pos">'+S(t.ingS)+'</div><div class="muted">de '+(metaTot?S(metaTot):'— sin meta definida')+'</div>'
+    +'<div class="kpi-value xl pos">'+S(totEq)+'</div><div class="muted">de '+(metaTot?S(metaTot):'— sin meta definida')+'</div>'
     +'<div style="display:flex;align-items:center;gap:12px;margin:8px 0 2px"><div class="track lg"><div class="fill" style="width:'+av.toFixed(1)+'%;background:var(--gr-pos)"></div></div><b>'+av.toFixed(0)+'%</b></div>'
     +'<div class="kpi-sub">'+(metaTot?(faltan>0?'Faltan '+S(faltan):'Meta cumplida')+' · ':'')+nAct+' asesores activos</div>'
-    +(t.ingU?'<div class="kpi-sub">'+usdTag()+' '+U(t.ingU)+' aparte</div>':'')
+    +(t.ingU?'<div class="kpi-sub">'+S(t.ingS)+' + '+usdTag()+' '+U(t.ingU)+' al TC del mes</div>':'')
     +(READONLY?'':'<div class="filterbar" style="margin-top:10px"><label>Meta S/ por asesor<input id="metaSoles" type="number" step="0.01" value="'+(meta.metaSoles||'')+'" style="width:130px"></label><button class="btn btn-secondary" id="saveMeta">Guardar meta</button></div>')+'</div>';
   var proyCard='<div class="card kpi"><div class="kpi-label">Avance por proyecto · m² reales vs meta</div>'
     +[['Palta',m2P,mtP,avP,'#84cc16'],['Pitahaya',m2T,mtT,avT,'#ec4899']].map(function(p){return '<div class="barrow" style="border:0;padding:6px 0"><div class="top"><span class="n">'+p[0]+'</span><span class="p">'+nf(p[1])+' de '+nf(p[2])+' m² · <b style="color:var(--gr-text)">'+p[3].toFixed(0)+'%</b></span></div><div class="track"><div class="fill" style="width:'+p[3].toFixed(1)+'%;background:'+p[4]+'"></div></div></div>';}).join('')+'</div>';
@@ -1751,13 +1756,13 @@ function renderVentas(){
     +kpiCard('M² vendidos',nf(totM2)+' m²',m2L.length+' lote'+(m2L.length!==1?'s':'')+' nuevo'+(m2L.length!==1?'s':'')+' · Palta '+nf(m2P)+' · Pitahaya '+nf(m2T)+(totM2-m2P-m2T>0.5?' · sin proyecto '+nf(totM2-m2P-m2T):''))
     +kpiCard('Operaciones',movs.length,rank.filter(function(r){return r.a!=='Sin asignar';}).length+' asesores con ventas')
     +'</div>'+proyCard+'</div></div>';
-  var rankCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Ventas por asesor</h2><div class="card-sub">% del total y m² vendidos</div></div></div>'
-    +(rank.length?'<div class="barlist">'+rank.map(function(r,i){var pct=t.ingS?r.v/t.ingS*100:0;return '<div class="barrow"><div class="top"><span class="i">'+(i+1)+'</span><span class="n">'+esc(r.a)+'</span><span class="v">'+S(r.v)+'</span><span class="p">'+pct.toFixed(1)+'%</span></div><div class="track"><div class="fill" style="width:'+(r.v/maxR*100).toFixed(1)+'%;background:var(--a-ventas)"></div></div><div class="x">'+nf(r.m2)+' m²</div></div>';}).join('')+'</div>'
+  var rankCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Ventas por asesor</h2><div class="card-sub">% del total y m² vendidos · dólares al TC del mes</div></div></div>'
+    +(rank.length?'<div class="barlist">'+rank.map(function(r,i){var pct=totEq?r.v/totEq*100:0;return '<div class="barrow"><div class="top"><span class="i">'+(i+1)+'</span><span class="n">'+esc(r.a)+'</span><span class="v">'+S(r.v)+'</span><span class="p">'+pct.toFixed(1)+'%</span></div><div class="track"><div class="fill" style="width:'+(r.v/maxR*100).toFixed(1)+'%;background:var(--a-ventas)"></div></div><div class="x">'+nf(r.m2)+' m²'+(r.u?' · incluye '+U(r.u):'')+'</div></div>';}).join('')+'</div>'
       :emptyHtml('chart-line-up','Sin ventas en este período','Clasifica un ingreso como Ventas en Movimientos.'))+'</div>';
-  var byC={};movs.forEach(function(m){if(m.moneda!=='USD'){var k=cuotaParse(m.cuota).k;byC[k]=(byC[k]||0)+m.abono;}});
+  var byC={};movs.forEach(function(m){var k=cuotaParse(m.cuota).k;byC[k]=(byC[k]||0)+montoPEN(m,false);});
   var conc=CUOTA_T.filter(function(t){return byC[t[0]]!=null||t[0]==='SEP'||t[0]==='INIP'||t[0]==='INIT';}).map(function(t){return {c:t[0]?t[1]:'Sin cuota',v:byC[t[0]]||0};}).sort(function(a,b){return b.v-a.v;});
   var concCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Resultados por tipo de cuota</h2><div class="card-sub">Monto y % del período · según la cuota anotada en Movimientos</div></div></div><div class="barlist">'
-    +conc.map(function(x){var pct=t.ingS?x.v/t.ingS*100:0;return '<div class="barrow"><div class="top"><span class="n">'+esc(x.c)+'</span><span class="v"'+(x.v?'':' style="color:var(--gr-text-3);font-weight:500"')+'>'+S(x.v)+'</span><span class="p">'+pct.toFixed(0)+'%</span></div><div class="track"><div class="fill" style="width:'+pct.toFixed(1)+'%;background:#38bdf8"></div></div></div>';}).join('')+'</div>'
+    +conc.map(function(x){var pct=totEq?x.v/totEq*100:0;return '<div class="barrow"><div class="top"><span class="n">'+esc(x.c)+'</span><span class="v"'+(x.v?'':' style="color:var(--gr-text-3);font-weight:500"')+'>'+S(x.v)+'</span><span class="p">'+pct.toFixed(0)+'%</span></div><div class="track"><div class="fill" style="width:'+pct.toFixed(1)+'%;background:#38bdf8"></div></div></div>';}).join('')+'</div>'
     +(READONLY?'':'<details class="more" id="persDet"'+(PERS_OPEN?' open':'')+'><summary>'+ico('users-three')+'Equipo de ventas y metas<span class="sp"></span><span class="muted" style="font-weight:500;font-size:12.5px">'+nAct+' asesor'+(nAct!==1?'es':'')+' activo'+(nAct!==1?'s':'')+'</span>'+'<i class="ph ph-caret-down cr"></i>'+'</summary><div class="in">'+renderAsesorMgmt(f.rango?'':f.ym,'ventas')+'</div></details>')+'</div>';
   var det;
   if(movs.length){
@@ -2035,10 +2040,11 @@ function renderConsolGeneral(){
   if(!movs.length){box.innerHTML='<div class="card">'+emptyHtml('chart-bar','Sin datos para ese rango','Elige otro año o limpia las fechas.','dash')+'</div>';return;}
   var T=totales(movs),present=mesesPresentes(movs),meses={};present.forEach(function(mn){meses[mn]={ing:0,egr:0};});
   movs.forEach(function(m){var mn=+m.fecha.slice(5,7);if(m.abono>0)meses[mn].ing+=montoPEN(m,false);else meses[mn].egr+=montoPEN(m,true);});
-  var pq=pctQueda(T.ingS,T.egrS),pos=pq>=0;
+  var Ieq=0,Eeq=0;present.forEach(function(mn){Ieq+=meses[mn].ing;Eeq+=meses[mn].egr;});
+  var pq=pctQueda(Ieq,Eeq),pos=pq>=0;
   var hero='<div class="hero"><div class="card kpi '+(pos?'kpi-posbox':'kpi-negbox')+'"><div class="kpi-label" style="color:'+(pos?'var(--gr-pos-ink)':'var(--gr-neg-ink)')+'">'+ico(pos?'trend-up':'trend-down','font-size:16px')+'% que queda · '+q.anio+'</div>'
       +'<div class="kpi-value '+(pos?'pos':'neg')+'" style="font-size:40px">'+(pq<0?'−':'')+Math.abs(pq).toFixed(1)+'%</div>'
-      +'<div style="font-size:13.5px">'+(pos?'Te queda <b>'+S(T.ingS-T.egrS)+'</b> de lo que ingresó':'Gastaste <b>'+S(T.egrS-T.ingS)+'</b> más de lo que ingresó')+(q.d1||q.d2?' en el rango.':' en el año.')+' <span class="muted">(solo soles)</span></div></div>'
+      +'<div style="font-size:13.5px">'+(pos?'Te queda <b>'+S(Ieq-Eeq)+'</b> de lo que ingresó':'Gastaste <b>'+S(Eeq-Ieq)+'</b> más de lo que ingresó')+(q.d1||q.d2?' en el rango.':' en el año.')+' <span class="muted">(dólares al TC del mes)</span></div></div>'
     +'<div style="display:flex;flex-direction:column;gap:16px"><div class="kpis2">'
       +kpiCard('Ingresos '+q.anio,S(T.ingS),T.ingU?usdTag()+' '+U(T.ingU)+' aparte':'',{vcls:'pos'})
       +kpiCard('Egresos '+q.anio,S(T.egrS),T.egrU?usdTag()+' '+U(T.egrU)+' aparte':'',{vcls:'neg'})+'</div>'
