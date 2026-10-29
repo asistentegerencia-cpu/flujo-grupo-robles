@@ -295,6 +295,7 @@ select.input-ghost{appearance:auto}
 .alert.pos{background:var(--gr-pos-bg);color:var(--gr-pos-ink)}
 .verbar{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:70;display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px;border-radius:12px;background:#0f2233;color:#fff;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.25);max-width:calc(100vw - 32px)}.verbar button{border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:700;padding:7px 12px;cursor:pointer}@media(min-width:900px){.verbar{bottom:24px}}
 .navbadge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#f59e0b;color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}.navbadge.neg{background:#ef4444}.navbadge[hidden]{display:none}
+.fd-sec{display:flex;flex-direction:column;gap:6px;margin-top:6px}.fd-sec+.fd-sec{margin-top:16px}.fd-sec>span{font-size:12.5px;color:var(--gr-text-2)}.fd-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--gr-border)}.fd-t{flex:1;min-width:220px;display:flex;flex-direction:column;gap:2px}.fd-t span{font-size:12px;color:var(--gr-text-2)}
 .bt-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}.bt-row{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--gr-border);border-radius:var(--r-md)}.bt-row.ok>.ph{color:var(--gr-pos)}.bt-row.warn>.ph{color:#d97706}.bt-row.neg>.ph{color:var(--gr-neg)}.bt-row.neg{background:color-mix(in srgb,var(--gr-neg-bg) 35%,transparent)}.bt-t{display:flex;flex-direction:column;gap:2px;min-width:0}.bt-t span{font-size:12px;color:var(--gr-text-2)}
 .sl-list{display:flex;flex-direction:column;gap:10px}.sl-item{border:1px solid var(--gr-border);border-radius:var(--r-md);padding:12px 14px;display:flex;flex-direction:column;gap:10px}.sl-item.neg{border-color:var(--gr-neg-bg);background:color-mix(in srgb,var(--gr-neg-bg) 35%,transparent)}.sl-item.warn{background:color-mix(in srgb,var(--gr-warn-bg) 30%,transparent)}
 .sl-top{display:flex;align-items:flex-start;gap:10px}.sl-item.ok .sl-top>.ph{color:var(--gr-pos)}.sl-item.warn .sl-top>.ph{color:#d97706}.sl-item.neg .sl-top>.ph{color:var(--gr-neg)}.sl-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.sl-t span{font-size:12.5px;color:var(--gr-text-2)}.sl-top .pill{flex-shrink:0;white-space:nowrap}
@@ -777,7 +778,7 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
 </div>
 <script>
 // ============ Supabase ============
-var APP_VER='2026-10-29.1';
+var APP_VER='2026-10-29.2';
 var SB_URL='https://vhqavbthsdhiwspwidhr.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZocWF2YnRoc2RoaXdzcHdpZGhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MDg1NjMsImV4cCI6MjA5OTI4NDU2M30.MFEHIgt2OPHD71tBs1k7b1TWWFNShP10Bvj3gH4Vvvo';
 // Enlace del correo: invitación o recuperar contraseña (se lee antes de que la librería limpie la dirección)
@@ -1927,7 +1928,55 @@ function sumarGrupos(movs){
     repartirGrupos(m,m.cargo,function(g,v){var o=by[g.k]=by[g.k]||{s:0,u:0,eq:0,l:g.l};if(usd){o.u+=v;T.u+=v;}else{o.s+=v;T.s+=v;}o.eq+=v*tc;T.eq+=v*tc;});});
   return {by:by,tot:T};
 }
+// ============ Costos fijos: detector de pagos recurrentes y tendencia ============
+var FIJ_IGN=null;
+async function cargarFijIgn(){try{var r=await sb.from('fijos_ignorar').select('clave');FIJ_IGN={};(r.data||[]).forEach(function(x){FIJ_IGN[x.clave]=1;});}catch(e){FIJ_IGN={};}}
+function claveFijo(m){return claveGasto(m)+'|'+m.moneda;}
+// Pagos que se repiten en 3 meses o más (administración y otros) y no están marcados como fijos en todos sus meses
+function fijosRecurrentes(){return memo('fijRec',function(){
+  var g={};allMovs().forEach(function(m){if(!(m.cargo>0)||/^(CAMBIO|BANCO|DEUDA GG|REVISAR|EVOLUTION|INGRESO)$/.test(m.area))return;if(botGenerico(m))return;
+    if(!(m.esFijo||/^(ADM|OTROS)$/.test(m.area)||/Alquiler|Servicios|Herramientas|Contabilidad|Seguros|AFP/.test(m.concepto||'')))return;
+    var k=claveFijo(m);(g[k]=g[k]||[]).push(m);});
+  return Object.keys(g).map(function(k){var l=g[k],ms={},fij=l.filter(function(m){return m.esFijo;}),no=l.filter(function(m){return !m.esFijo;});
+    l.forEach(function(m){ms[ym(m.fecha)]=1;});var cnt={};l.forEach(function(m){cnt[m.area]=(cnt[m.area]||0)+1;});
+    return {k:k,l:l,fij:fij,no:no,meses:Object.keys(ms).length,prom:l.reduce(function(a,m){return a+m.cargo;},0)/l.length,moneda:l[0].moneda,
+      desc:l[0].desc||l[0].mov,area:Object.keys(cnt).sort(function(a,b){return cnt[b]-cnt[a];})[0],ult:l.reduce(function(a,m){return m.fecha>a?m.fecha:a;},'')};})
+    .filter(function(x){return x.meses>=3&&x.no.length&&!(FIJ_IGN&&FIJ_IGN[x.k]);})
+    .sort(function(a,b){return (b.fij.length?1:0)-(a.fij.length?1:0)||b.meses-a.meses||b.prom-a.prom;});});}
+function detectorFijosHtml(){var L=fijosRecurrentes();if(!L.length||READONLY)return '';
+  var med=L.filter(function(x){return x.fij.length;}),nunca=L.filter(function(x){return !x.fij.length;});
+  function fila(x,i){var mon=x.moneda==='USD'?U:S;return '<div class="fd-row"><div class="fd-t"><b>'+esc(x.desc)+'</b><span>'+esc(areaLabel(x.area))+' · se pagó en '+x.meses+' meses · '+x.l.length+' pagos · promedio '+mon(x.prom)+(x.fij.length?' · <b>'+x.fij.length+' marcados, '+x.no.length+' sin marcar</b>':'')+'</span></div>'
+    +'<button class="btn btn-brand btn-sm fdSi" data-k="'+encodeURIComponent(x.k)+'">'+ico('buildings')+(x.fij.length?'Marcar los '+x.no.length+' que faltan':'Es fijo · marcar '+x.no.length)+'</button>'
+    +'<button class="btn btn-ghost btn-sm fdNo" data-k="'+encodeURIComponent(x.k)+'">No es fijo</button></div>';}
+  return '<div class="card"><div class="card-head"><div><h2 class="card-title">'+ico('robot')+' Detector de costos fijos</h2><div class="card-sub">Pagos que se repiten cada mes en administración y otros · revisa y decide</div></div></div>'
+    +(med.length?'<div class="fd-sec"><b>Marcados a medias</b><span>El mismo pago está como fijo en unos meses y en otros no. Marcar el resto los deja parejos (se copia el reparto).</span>'+med.map(fila).join('')+'</div>':'')
+    +(nunca.length?'<div class="fd-sec"><b>Se repiten pero nunca se marcaron</b><span>Pueden ser costos fijos (sueldos administrativos, servicios, alquiler…). Si no lo son, toca «No es fijo» y no se vuelven a sugerir.</span>'+nunca.slice(0,12).map(fila).join('')+(nunca.length>12?'<div class="muted" style="font-size:12.5px;margin-top:6px">+ '+(nunca.length-12)+' más</div>':'')+'</div>':'')+'</div>';}
+function wireDetectorFijos(){var box=$('fijosBody');
+  Array.prototype.forEach.call(box.querySelectorAll('.fdSi'),function(b){b.onclick=async function(){var k=decodeURIComponent(b.dataset.k),x=fijosRecurrentes().filter(function(y){return y.k===k;})[0];if(!x)return;
+    var ref=x.fij.slice().sort(function(a,c){return a.fecha<c.fecha?1:-1;})[0];b.disabled=true;SILENT=true;
+    for(var i=0;i<x.no.length;i++){var m=x.no[i];m.esFijo=true;m.reparto=ref?(ref.reparto||''):'';m.bot='';await updateMov(m);}
+    SILENT=false;setSync('');toast(x.no.length+(x.no.length===1?' pago marcado':' pagos marcados')+' como costo fijo');renderActual();};});
+  Array.prototype.forEach.call(box.querySelectorAll('.fdNo'),function(b){b.onclick=async function(){var k=decodeURIComponent(b.dataset.k);b.disabled=true;
+    var r=await sb.from('fijos_ignorar').insert({clave:k});if(r&&r.error){alert('No se guardó: '+r.error.message);b.disabled=false;return;}FIJ_IGN[k]=1;toast('No se volverá a sugerir');renderActual();};});}
+// Tendencia de costos fijos del año: total por mes, por tipo, y alzas de más de 10% contra el promedio de los meses anteriores
+function tendenciaFijosHtml(ymC){var anio=(ymC||'').slice(0,4);if(!anio)return '';
+  var fj=allMovs().filter(function(m){return m.cargo>0&&m.esFijo&&m.fecha.slice(0,4)===anio;});if(!fj.length)return '';
+  var present=mesesPresentes(fj),tot={},tipo={},tipoTot={};present.forEach(function(mn){tot[mn]=0;});
+  fj.forEach(function(m){var mn=+m.fecha.slice(5,7),v=montoPEN(m,true),t=m.concepto||'Sin tipo';tot[mn]+=v;tipo[t]=tipo[t]||{};tipo[t][mn]=(tipo[t][mn]||0)+v;tipoTot[t]=(tipoTot[t]||0)+v;});
+  var prom=present.reduce(function(a,mn){return a+tot[mn];},0)/present.length;
+  // alzas: cada pago fijo (por quién/qué) en el mes elegido vs su promedio de los 3 meses anteriores en que se pagó
+  var mesSel=ymC,porK={};allMovs().forEach(function(m){if(!(m.cargo>0)||!m.esFijo)return;var k=claveFijo(m),y=ym(m.fecha);porK[k]=porK[k]||{d:m.desc||m.mov,mon:m.moneda,m:{}};porK[k].m[y]=(porK[k].m[y]||0)+m.cargo;});
+  var alzas=Object.keys(porK).map(function(k){var o=porK[k],cur=o.m[mesSel];if(!cur)return null;var prev=Object.keys(o.m).filter(function(y){return y<mesSel;}).sort().slice(-3);if(!prev.length)return null;
+    var av=prev.reduce(function(a,y){return a+o.m[y];},0)/prev.length;return cur>av*1.10&&cur-av>=20?{d:o.d,mon:o.mon,cur:cur,av:av,pct:(cur/av-1)*100}:null;}).filter(Boolean).sort(function(a,b){return b.pct-a.pct;});
+  var sinTipo=tipoTot['Sin tipo']||0,totAnio=Object.keys(tipoTot).reduce(function(a,t){return a+tipoTot[t];},0);
+  var filas=Object.keys(tipoTot).sort(function(a,b){return tipoTot[b]-tipoTot[a];}).map(function(t){return {k:t,l:t,tot:tipoTot[t]};});
+  var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Tendencia de costos fijos · '+anio+'</h2><div class="card-sub">Cuánto cuesta mantener la empresa cada mes · '+NOTA_USD+' · promedio '+S(prom)+' al mes</div></div></div>'
+    +barsChart(present,[{get:function(mn){return tot[mn];},color:'#8b5cf6',label:'Costos fijos'}])
+    +(alzas.length?'<div class="alert warn" style="margin-top:12px;flex-direction:column;gap:6px"><span style="display:flex;gap:8px">'+ico('trend-up')+'<b>Subieron más de 10% en '+esc(mesLargo(mesSel))+'</b></span>'+alzas.slice(0,6).map(function(a){var F=a.mon==='USD'?U:S;return '<span>· '+esc(a.d)+': '+F(a.cur)+' vs '+F(a.av)+' de promedio <b>(+'+a.pct.toFixed(0)+'%)</b></span>';}).join('')+'</div>':'')
+    +(sinTipo&&totAnio&&sinTipo/totAnio>0.3?'<p class="nota">'+(sinTipo/totAnio*100).toFixed(0)+'% de los fijos del año no tiene <b>tipo de egreso</b> (alquiler, servicios, sueldo…). Ponerle tipo en Movimientos mejora este cuadro.</p>':'')+'</div>';
+  return h+pivotCard('Costos fijos por tipo y mes',anio+' · '+NOTA_USD,filas,present,function(k,mn){return (tipo[k]&&tipo[k][mn])||0;},'Tipo');}
 function renderFijos(){
+  if(FIJ_IGN===null){cargarFijIgn().then(function(){if(VISTA==='fijos')renderFijos();});}
   var f=F(),base=movsFiltro(),box=$('fijosBody');
   var ymC=f.rango?(f.d?ym(f.d):f.ym):f.ym,editable=!READONLY&&HAS_BASES;
   var fijos=base.filter(function(m){return m.cargo>0&&m.esFijo;}).sort(function(a,b){return b.cargo-a.cargo;});
@@ -1941,7 +1990,8 @@ function renderFijos(){
     +(sug.length>5?'<div class="muted" style="margin-top:6px;font-size:12.5px">+ '+(sug.length-5)+' más</div>':'')+'</div></div>';
   var x=sumarGrupos(fijos),T=x.tot,G=gruposDe(ymC),totN=G.reduce(function(s,g){return s+(+g.n||0);},0);
   var cuadro=cuadroHtml(ymC,x.by,editable);
-  if(!fijos.length){box.innerHTML=sugHtml+cuadro+'<div class="card">'+emptyHtml('buildings','No hay costos fijos en este período','En Movimientos, abre un egreso y marca "Es costo fijo".','dash')+'</div>';wireFijos(conocidas);wireCuadro(ymC);return;}
+  var detH=detectorFijosHtml(),tendH=tendenciaFijosHtml(ymC);if(detH)sugHtml='';
+  if(!fijos.length){box.innerHTML=detH+sugHtml+cuadro+'<div class="card">'+emptyHtml('buildings','No hay costos fijos en este período','En Movimientos, abre un egreso y marca "Es costo fijo".','dash')+'</div>'+tendH;wireFijos(conocidas);wireCuadro(ymC);wireDetectorFijos();return;}
   var kpis='<div class="kpis4">'
     +kpiCard('Fijos en soles',S(T.s),periodoTxt(),{vcls:'neg'})
     +kpiCard('Fijos en dólares '+usdTag(),U(T.u),'sin convertir',{vcls:'neg'})
@@ -1963,8 +2013,8 @@ function renderFijos(){
       +(READONLY?'':'<td data-l="Fijo"><input type="checkbox" class="chk fijoOff" data-sig="'+se+'" checked aria-label="Es costo fijo"></td>')+'</tr>';}).join('');
   var tot='<tr class="total"><td>Total por área</td><td></td><td></td>'+cols.map(function(c){var o=x.by[c.k]||{s:0,u:0};return '<td class="num" data-l="'+esc(c.l)+'"><div class="stack">'+(o.s?'<span>'+S(o.s)+'</span>':'')+(o.u?'<span class="usd">'+U(o.u)+'</span>':'')+(o.s||o.u?'':'—')+'</div></td>';}).join('')+(READONLY?'':'<td></td>')+'</tr>';
   var mat='<div class="card"><div class="card-head"><div><h2 class="card-title">Detalle por gasto</h2><div class="card-sub">Cómo se reparte cada costo fijo según el cuadro'+(READONLY?'':' · toca ÷ para elegir qué áreas participan')+'</div></div></div><div class="tablewrap"><table class="table cards"><thead>'+head+'</thead><tbody>'+body+tot+'</tbody></table></div></div>';
-  box.innerHTML=kpis+sugHtml+cuadro+dist+mat;
-  wireFijos(conocidas);wireCuadro(ymC);
+  box.innerHTML=kpis+detH+sugHtml+tendH+cuadro+dist+mat;
+  wireFijos(conocidas);wireCuadro(ymC);wireDetectorFijos();
 }
 function wireFijos(conocidas){
   if(READONLY)return;var box=$('fijosBody');
