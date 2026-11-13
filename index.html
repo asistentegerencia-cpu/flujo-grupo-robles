@@ -1360,13 +1360,27 @@ function renderPreview(){
   if(P.porOp)h+='<div class="alert pos">'+ico('shield-check')+'<span>'+P.porOp+(P.porOp===1?' movimiento ya estaba guardado':' movimientos ya estaban guardados')+' aunque el banco le cambió la fecha o la descripción: se reconocieron por el N° de operación y no se duplican.</span></div>';
   if(nBot)h+='<div class="alert pos">'+ico('robot')+'<span>El bot clasificó solo <b>'+nBot+'</b> de '+n+' según cómo se clasificaron antes movimientos parecidos. Quedan marcados como <b>Bot</b> para que los revises.</span></div>';
   if(nRev)h+='<div class="alert warn">'+ico('warning')+'<span>'+nRev+(nRev===1?' movimiento no se pudo clasificar solo y quedará':' movimientos no se pudieron clasificar solos y quedarán')+' en REVISAR.</span></div>';
+  var ci=cierresDelArchivo(P),ciK=Object.keys(ci).sort();
+  if(ciK.length)h+='<div class="alert pos">'+ico('check-circle')+'<span>El archivo trae el mes completo de <b>'+ciK.map(function(y){return esc(mesLargo(y));}).join(', ')+'</b>: se actualiza su saldo de cierre con el saldo del banco del último movimiento del mes ('+ciK.map(function(y){var x=ci[y];return esc(mesCorto(y))+': '+(x.o.soles!=null&&x.o.soles!==x.antes.soles?(x.antes.soles!=null?S(x.antes.soles)+' → ':'')+S(x.o.soles):'')+(x.o.dolares!=null&&x.o.dolares!==x.antes.dolares?' '+(x.antes.dolares!=null?U(x.antes.dolares)+' → ':'')+U(x.o.dolares):'');}).join(' · ')+').</span></div>';
   if(sd&&sd.omitido)h+='<div class="alert warn">'+ico('info')+'<span>El saldo que trae el archivo ('+(sd.arch.soles!=null?S(sd.arch.soles):'')+(sd.arch.dolares!=null?' · '+U(sd.arch.dolares):'')+') es el del día en que se descargó. Como ya hay meses posteriores a '+esc(mesLargo(sd.ym))+' cargados, <b>no se cambia el saldo de cierre de '+esc(mesLargo(sd.ym))+'</b>. Solo se guardan los movimientos.</span></div>';
   if(n){h+='<div class="prevlist">'+lista.slice(0,6).map(function(m){return '<div class="prevrow"><span class="f">'+dmy(m.fecha)+'</span><span class="d">'+esc(m.desc||m.mov)+' <span>'+esc(m.mov)+'</span></span>'+montoHtml(m)+'</div>';}).join('')+'</div>'+(n>6?'<div class="muted3" style="font-size:12.5px;margin-bottom:10px">+ '+(n-6)+' más</div>':'');}
   else h+='<div class="alert pos" style="margin:10px 0">'+ico('check-circle')+'<span>No hay movimientos nuevos: todo ya estaba guardado.'+(sd&&sd.cambia?' El saldo del banco sí cambió y se puede guardar.':'')+'</span></div>';
-  if((n||(sd&&sd.cambia))&&!READONLY)h+='<button class="btn btn-success btn-lg" id="save">'+ico('cloud-arrow-up')+'Guardar en la nube</button>';
+  if((n||(sd&&sd.cambia)||ciK.length)&&!READONLY)h+='<button class="btn btn-success btn-lg" id="save">'+ico('cloud-arrow-up')+'Guardar en la nube</button>';
   c.innerHTML=h;c.style.display='block';
   var b=$('save');if(b)b.onclick=guardar;
 }
+// Cierres de los meses COMPLETOS que trae el archivo (los que no son el último): el saldo del banco después del último
+// movimiento de ese mes, leído de la columna de saldo del Excel. Solo si la cadena de saldos del archivo es coherente
+// (saldo anterior + abono − cargo = saldo) en al menos 95% de las líneas; si no, no se toca nada.
+function cierresDelArchivo(P){var o={};
+  [['PEN','soles'],['USD','dolares']].forEach(function(c){var ls=P.built.filter(function(m){return m.moneda===c[0]&&m.saldoCont!==''&&m.saldoCont!=null;});if(ls.length<2)return;
+    if(ls[0].fecha>ls[ls.length-1].fecha)ls=ls.slice().reverse();
+    var ok=0;for(var i=1;i<ls.length;i++){if(Math.abs(+ls[i-1].saldoCont+(ls[i].abono||0)-(ls[i].cargo||0)-(+ls[i].saldoCont))<0.01)ok++;}
+    if(ok<(ls.length-1)*0.95)return;
+    var ult={};ls.forEach(function(m){ult[ym(m.fecha)]=+m.saldoCont;});
+    var ks=Object.keys(ult).sort();ks.slice(0,-1).forEach(function(y){var prev=DB.saldos[y]||{},v=Math.round(ult[y]*100)/100;
+      if(prev[c[1]]==null||Math.abs(+prev[c[1]]-v)>=0.005){(o[y]=o[y]||{antes:prev,o:{soles:prev.soles!=null?prev.soles:null,dolares:prev.dolares!=null?prev.dolares:null,tc:prev.tc!=null?prev.tc:null}}).o[c[1]]=v;}});});
+  return o;}
 // Saldo del banco que trae el archivo, para el último mes del archivo
 function saldoDelArchivo(P){
   var months={};P.built.forEach(function(m){months[ym(m.fecha)]=true;});
@@ -1391,7 +1405,10 @@ async function guardar(){
   if(e1){btn.disabled=false;showErr('No se guardó nada: '+e1.message+'. Revisa tu conexión y vuelve a tocar "Guardar en la nube".');return;}
   PREVIEW.nuevos.forEach(function(m){DB.movs[m.sig]=m;});
   PREVIEW.nuevos=[];
-  // 2) saldo del banco: si falla, los movimientos ya quedaron guardados y el botón permite reintentar solo el saldo
+  // 2) cierres de los meses completos del archivo (saldo del banco del último movimiento de cada mes)
+  var ci=cierresDelArchivo(PREVIEW);
+  for(var yc in ci){var ec=await upsertSaldo(yc,ci[yc].o);if(ec){btn.disabled=false;btn.innerHTML=ico('arrow-clockwise')+'Reintentar guardar saldo';showErr('No se guardó el cierre de '+mesLargo(yc)+': '+ec.message+'. Vuelve a tocar el botón (no se duplican movimientos).');return;}DB.saldos[yc]=ci[yc].o;}
+  // 3) saldo del banco del último mes: si falla, los movimientos ya quedaron guardados y el botón permite reintentar solo el saldo
   var sd=saldoDelArchivo(PREVIEW);
   if(sd&&!sd.omitido){var e2=await upsertSaldo(sd.ym,sd.o);
     if(e2){btn.disabled=false;btn.innerHTML=ico('arrow-clockwise')+'Reintentar guardar saldo';buildFilters();
@@ -2351,7 +2368,16 @@ function ventaBase(p){var k=loteKey(p);if(!k||k.charAt(0)!=='L'||!p.etapa)return
   var et=ltEtapa(p.etapa),ids=[],ok=true;
   String(p.lote).split('+').forEach(function(l){l=l.trim();if(!l)return;var c=ix.o[et+'|'+ltNom(l)];if(!c){ok=false;return;}if(ids.indexOf(c.id)===-1)ids.push(c.id);});
   return ok&&ids.length===1?'V|'+ids[0]:k;}
-function ventaKey(p){var b=ventaBase(p);return b&&VJ[b]?VJ[b]:b;}
+function ventaKey0(p){var b=ventaBase(p);return b&&VJ[b]?VJ[b]:b;}
+// Lote revendido: si un cliente DESISTIÓ de un lote y después otra persona paga ese mismo lote, es una venta NUEVA
+// (no se mezcla con la desistida). Ej.: W-30 separó Tamira y desistió; luego lo compró otro cliente.
+function reventas(){return memo('reventas',function(){var D={};
+  allMovs().forEach(function(m){if(!(m.abono>0)||(m.clas!=='VENTAS'&&m.clas!=='COBRANZA'))return;partesMov(m).forEach(function(p){if(cuotaParse(p.cuota).k!=='DESIST')return;var k=ventaKey0(p);if(!k)return;
+    var d=D[k]=D[k]||{fecha:'',cli:[]};if(!d.fecha||m.fecha>d.fecha)d.fecha=m.fecha;if(m.cliente&&d.cli.indexOf(m.cliente)===-1)d.cli.push(m.cliente);});});
+  return D;});}
+function ventaKey(p){var k=ventaKey0(p);if(!k)return k;var d=reventas()[k];
+  if(d&&p.fecha&&p.fecha>d.fecha&&cuotaParse(p.cuota).k!=='DESIST'&&p.cliente&&!d.cli.some(function(c){return mismoTitular(c,p.cliente);}))return k+'#R';
+  return k;}
 function contratoDe(k){var ix=ctIdx();return ix&&k&&k.indexOf('V|')===0?ix.byId[k.slice(2)]:null;}
 // m² de una venta: suma de sus lotes (m² de Evolta; si no está, lo anotado en Movimientos)
 function m2DeGrupo(parts){var lots={},maxAll=0;
@@ -2385,7 +2411,8 @@ async function separarVenta(grupo){
 // pero el DINERO se respeta en su mes: en cada periodo solo suma lo que entró en ese periodo (el acumulado es solo referencia).
 var VC={};          // ventas confirmadas a mano: clave → {ym}
 async function cargarVentasConf(){var r=await sb.from('ventas_confirmadas').select('clave,ym');VC={};if(!r.error)(r.data||[]).forEach(function(x){VC[x.clave]=x;});}
-function clavesVenta(g){return [g.k].concat(g.bases.filter(function(b){return b!==g.k;}));}
+// En una reventa (#R) la confirmación es solo de esta venta: no hereda la del lote anterior
+function clavesVenta(g){return /#R$/.test(g.k)?[g.k]:[g.k].concat(g.bases.filter(function(b){return b!==g.k;}));}
 function ventaConfirmada(g){return clavesVenta(g).some(function(c){return !!VC[c];});}
 var LV_G={};        // grupos pintados en pantalla (para los botones)
 async function confirmarVenta(k,si){
