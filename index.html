@@ -1805,23 +1805,7 @@ function ventasIndicadoresHtml(m2L,ymSel){
     +(ks.length?'<div class="tablewrap"><table class="table cards"><thead><tr><th>Asesor</th><th class="num">Lotes nuevos</th><th class="num">M²</th><th class="num">Ticket promedio</th><th class="num">Precio por m²</th></tr></thead><tbody>'
       +ks.map(function(k){var a=A[k];return '<tr><td class="full"><b>'+esc(k)+'</b></td><td class="num" data-l="Lotes nuevos">'+a.n+'</td><td class="num" data-l="M²">'+nf(a.m2)+'</td><td class="num" data-l="Ticket promedio">'+(a.np?S(a.precio/a.np):'<span class="muted3">'+(LT.contratos?'sin contrato':'cargando…')+'</span>')+'</td><td class="num" data-l="Precio por m²">'+(a.m2p?S(a.precio/a.m2p):'—')+'</td></tr>';}).join('')
       +'</tbody></table></div>':emptyHtml('chart-line-up','Sin lotes nuevos en este período',''))+'</div>';
-  // 2) Conversión de separaciones del año, por asesor
-  var C={};allMovs().forEach(function(m){if(!(m.abono>0)||m.clas!=='VENTAS'||m.fecha.slice(0,4)!==anio)return;var k0=cuotaParse(m.cuota).k;if(k0!=='SEP'&&k0!=='DESIST')return;
-    var e=sepEstado(m);if(!e)return;var k=m.asesor||'Sin asignar',c=C[k]=C[k]||{n:0,conv:0,pend:0,des:0,sl:0,dias:0};c.n++;
-    if(e.k==='conv'){c.conv++;c.dias+=diasEntre(m.fecha,e.fecha);}else if(e.k==='pend')c.pend++;else if(e.k==='desist')c.des++;else c.sl++;});
-  var kc=Object.keys(C).sort(function(a,b){return C[b].n-C[a].n;}),T={n:0,conv:0,pend:0,des:0,sl:0};kc.forEach(function(k){['n','conv','pend','des','sl'].forEach(function(f){T[f]+=C[k][f];});});
-  function pct(a,b){return b?(a/b*100).toFixed(0)+'%':'—';}
-  var conv='<div class="card"><div class="card-head"><div><h2 class="card-title">Conversión de separaciones · '+anio+'</h2><div class="card-sub">De cada separación: ¿se convirtió en venta, sigue pendiente o desistió? · '+T.n+' separaciones en el año, '+pct(T.conv,T.n)+' convertidas</div></div></div>'
-    +(kc.length?'<div class="tablewrap"><table class="table cards"><thead><tr><th>Asesor</th><th class="num">Separaciones</th><th class="num">Se convirtieron</th><th class="num">Pendientes</th><th class="num">Desistieron</th><th class="num">Sin lote</th><th class="num">% conversión</th><th class="num">Días a la venta</th></tr></thead><tbody>'
-      +kc.map(function(k){var c=C[k],p=c.n?c.conv/c.n*100:0;return '<tr><td class="full"><b>'+esc(k)+'</b></td><td class="num" data-l="Separaciones">'+c.n+'</td><td class="num pos" data-l="Se convirtieron">'+c.conv+'</td><td class="num" data-l="Pendientes">'+c.pend+'</td><td class="num neg" data-l="Desistieron">'+c.des+'</td><td class="num muted" data-l="Sin lote">'+c.sl+'</td>'
-        +'<td class="num" data-l="% conversión"><span class="pill '+(p>=60?'ok':p>=35?'warn':'ex')+'">'+pct(c.conv,c.n)+'</span></td><td class="num" data-l="Días a la venta">'+(c.conv?Math.round(c.dias/c.conv)+' d':'—')+'</td></tr>';}).join('')
-      +'</tbody></table></div><p class="nota">«Se convirtió» = el lote tuvo otro pago después de la separación. «Sin lote» = la separación no tiene lote anotado, así que no se puede saber si compró.</p>':emptyHtml('handshake','Sin separaciones en '+anio,''))+'</div>';
-  // 3) Ventas por proyecto mes a mes (m² de lotes nuevos)
-  var present=[],P={};for(var i=1;i<=12;i++){var y=anio+'-'+('0'+i).slice(-2),ms=movsDe(y).filter(function(m){return m.clas==='VENTAS'&&esIngreso(m);});if(!ms.length)continue;present.push(i);P[i]={Palta:0,Pitahaya:0,Otro:0};
-    m2PorLote(ms).forEach(function(x){var pr=x.proyecto==='Palta'||x.proyecto==='Pitahaya'?x.proyecto:'Otro';P[i][pr]+=x.m2;});}
-  var proy=present.length?'<div class="card"><div class="card-head"><div><h2 class="card-title">M² vendidos por proyecto · '+anio+'</h2><div class="card-sub">Lotes nuevos de cada mes</div></div>'+legendHtml([['Palta','#84cc16'],['Pitahaya','#ec4899'],['Sin proyecto','#94a3b8']])+'</div>'
-    +barsChart(present,[{get:function(mn){return P[mn].Palta;},color:'#84cc16',label:'Palta'},{get:function(mn){return P[mn].Pitahaya;},color:'#ec4899',label:'Pitahaya'},{get:function(mn){return P[mn].Otro;},color:'#94a3b8',label:'Sin proyecto'}])+'</div>':'';
-  return ind+conv+proy;
+  return ind;
 }
 
 // ============ COBRANZA ============
