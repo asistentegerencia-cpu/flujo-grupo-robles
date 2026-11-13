@@ -1797,14 +1797,15 @@ function contratoLote(etapa,lote){if(!LT.contratos||!lote)return null;var ix=LT.
   var l=String(lote).split('+')[0];return ix[(etapa?ltEtapa(etapa):'?')+'|'+ltNom(l)]||ix['?|'+ltNom(l)]||null;}
 function ventasIndicadoresHtml(m2L,ymSel){
   var anio=(ymSel||'').slice(0,4);
-  // 1) Indicadores por asesor (lotes nuevos del período): ticket y precio por m² según el contrato de Evolta
-  var A={};m2L.forEach(function(x){var k=x.asesor||'Sin asignar',a=A[k]=A[k]||{n:0,m2:0,precio:0,m2p:0,np:0};a.n++;a.m2+=x.m2;
-    var c=contratoLote(x.etapa,x.lote);if(c&&c.precio){var p=c.precio*((/US|\$/i.test(c.moneda||''))?getTC(ym(x.fecha)):1);a.precio+=p;a.np++;a.m2p+=x.m2;}});
-  var ks=Object.keys(A).sort(function(a,b){return A[b].m2-A[a].m2;});
-  var ind='<div class="card"><div class="card-head"><div><h2 class="card-title">Indicadores por asesor</h2><div class="card-sub">Lotes nuevos del período · ticket y precio por m² según el contrato en Evolta (dólares al TC del mes)</div></div></div>'
-    +(ks.length?'<div class="tablewrap"><table class="table cards"><thead><tr><th>Asesor</th><th class="num">Lotes nuevos</th><th class="num">M²</th><th class="num">Ticket promedio</th><th class="num">Precio por m²</th></tr></thead><tbody>'
-      +ks.map(function(k){var a=A[k];return '<tr><td class="full"><b>'+esc(k)+'</b></td><td class="num" data-l="Lotes nuevos">'+a.n+'</td><td class="num" data-l="M²">'+nf(a.m2)+'</td><td class="num" data-l="Ticket promedio">'+(a.np?S(a.precio/a.np):'<span class="muted3">'+(LT.contratos?'sin contrato':'cargando…')+'</span>')+'</td><td class="num" data-l="Precio por m²">'+(a.m2p?S(a.precio/a.m2p):'—')+'</td></tr>';}).join('')
-      +'</tbody></table></div>':emptyHtml('chart-line-up','Sin lotes nuevos en este período',''))+'</div>';
+  // 1) Indicadores por asesor (lotes nuevos del período) con la PLATA DEL BANCO: lo que entró en el período por esas ventas
+  //    (el dinero se respeta en su mes: una separación de un mes anterior no se suma aquí). Dólares al TC del mes.
+  var plata={};movsFiltro().forEach(function(m){if(!(m.abono>0)||m.clas!=='VENTAS')return;partesMov(m).forEach(function(p){var k=ventaKey(p);if(k)plata[k]=(plata[k]||0)+p.s;});});
+  var A={};m2L.forEach(function(x){var k=x.asesor||'Sin asignar',a=A[k]=A[k]||{n:0,m2:0,s:0};a.n++;a.m2+=x.m2;a.s+=plata[x.k]||0;});
+  var ks=Object.keys(A).sort(function(a,b){return A[b].s-A[a].s||A[b].m2-A[a].m2;});
+  var ind='<div class="card"><div class="card-head"><div><h2 class="card-title">Indicadores por asesor</h2><div class="card-sub">Lotes nuevos del período · con lo que entró al banco en el período por esas ventas (dólares al TC del mes)</div></div></div>'
+    +(ks.length?'<div class="tablewrap"><table class="table cards"><thead><tr><th>Asesor</th><th class="num">Lotes nuevos</th><th class="num">M²</th><th class="num">Entró al banco</th><th class="num">Promedio por venta</th><th class="num">S/ por m²</th></tr></thead><tbody>'
+      +ks.map(function(k){var a=A[k];return '<tr><td class="full"><b>'+esc(k)+'</b></td><td class="num" data-l="Lotes nuevos">'+a.n+'</td><td class="num" data-l="M²">'+nf(a.m2)+'</td><td class="num" data-l="Entró al banco"><b>'+S(a.s)+'</b></td><td class="num" data-l="Promedio por venta">'+(a.n?S(a.s/a.n):'—')+'</td><td class="num" data-l="S/ por m²">'+(a.m2?S(a.s/a.m2):'—')+'</td></tr>';}).join('')
+      +'</tbody></table></div><p class="nota">Solo cuenta el dinero que entró al banco en el período elegido. Si una venta se separó en un mes anterior, esa separación queda en su mes.</p>':emptyHtml('chart-line-up','Sin lotes nuevos en este período',''))+'</div>';
   return ind;
 }
 
