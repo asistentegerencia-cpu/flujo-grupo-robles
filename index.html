@@ -793,13 +793,19 @@ var HAS_REPARTO=false, HAS_TC=false, HAS_CAMBIO=false, HAS_ETAPA=false, HAS_LREP
 var TC={1:3.47,2:3.47,3:3.47,4:3.45,5:3.42,6:3.40,7:3.42,8:3.47,9:3.47,10:3.47,11:3.47,12:3.47};
 var MESES=['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SETIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
 var NUCLEO=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'];
-var SEG=['BANCO','DVO','OTROS','EVOLUTION'];
+var SEG=['BANCO','DVO','OTROS','EVOLUTION','PREST DIR'];
+// Cuenta Dirección (clave 'DEUDA GG'): 3 ítems
+//  1) Capitalización (50%): lo único que se mide contra la meta del 50%
+//  2) Devolución de préstamos: Pachamama le devuelve a Dirección lo que esta le prestó → se suma aparte como 'PREST DIR' (no es capitalización)
+//  3) Préstamo de Dirección: ingreso de Bayas y Frutos / Grupo Inmobiliario clasificado como financiamiento (ver esPrestamoDir)
+function esDevPrestamo(m){return m.area==='DEUDA GG'&&m.cargo>0&&/^(Devoluci[oó]n de pr[eé]stamos|Pago de pr[eé]stamo)$/.test(m.concepto||'');}
+function areaCalc(m){return esDevPrestamo(m)?'PREST DIR':m.area;}
 var RECOM={'DEUDA GG':50,'OPE Planta':7,'OPE Infra':20,'OPE Comex':3,'VENTAS':5,'MKT':5,'ADM':10};
 var AREAS=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM','BANCO','DVO','OTROS','EVOLUTION','CAMBIO','INGRESO','REVISAR'];
 // 'DEUDA GG' es la clave guardada en la BD; en pantalla se muestra con su nombre nuevo
-var AREA_LABEL={'CAMBIO':'Cambio de moneda','DEUDA GG':'CAPITALIZACIÓN DIRECCIÓN','EVOLUTION':'Evolution (entidad aparte)','BANCO':'Banco (ITF)','DVO':'Diferencia de cambio','OTROS':'Otros'};
+var AREA_LABEL={'CAMBIO':'Cambio de moneda','DEUDA GG':'Cuenta Dirección','PREST DIR':'Cuenta Dirección · devolución de préstamos','EVOLUTION':'Evolution (entidad aparte)','BANCO':'Banco (ITF)','DVO':'Diferencia de cambio','OTROS':'Otros'};
 function areaLabel(a){return AREA_LABEL[a]||a;}
-var AREA_COLOR={'DEUDA GG':'#f87171','OPE Planta':'#34d399','OPE Infra':'#22d3ee','OPE Comex':'#a78bfa','VENTAS':'#fbbf24','MKT':'#f472b6','ADM':'#60a5fa','BANCO':'#94a3b8','DVO':'#c084fc','OTROS':'#64748b','EVOLUTION':'#fb923c','CAMBIO':'#14b8a6','INGRESO':'#22c55e','REVISAR':'#f87171'};
+var AREA_COLOR={'DEUDA GG':'#f87171','PREST DIR':'#fca5a5','OPE Planta':'#34d399','OPE Infra':'#22d3ee','OPE Comex':'#a78bfa','VENTAS':'#fbbf24','MKT':'#f472b6','ADM':'#60a5fa','BANCO':'#94a3b8','DVO':'#c084fc','OTROS':'#64748b','EVOLUTION':'#fb923c','CAMBIO':'#14b8a6','INGRESO':'#22c55e','REVISAR':'#f87171'};
 // Clasificación de ingresos, INDEPENDIENTE del Área (que solo clasifica egresos del núcleo/seguimiento)
 var CLAS_LABEL={'':'—','VENTAS':'Ventas','COBRANZA':'Cobranza','OTROS':'Otros ingresos (reembolsos, intereses…)','FINANCIAMIENTO':'Financiamiento (préstamo/socios)','CAMBIO':'Cambio de moneda (compra/venta de dólares)'};
 function clasLabel(c){return CLAS_LABEL[c||'']||c;}
@@ -814,7 +820,7 @@ var TIPOS_EGRESO={
   'OPE Planta':['Sueldo / jornal','Proveedores de esquejes / plantones','Insumos (fertilizantes, riego…)','Mantenimiento / maquinaria','Flete / movilidad','Devolución a proveedor','Otro'],
   'OPE Comex':['Sueldo','Empaques','Compra de producto','Flete / exportación','Trámites','Otro'],
   'OPE Infra':['Obra','Materiales','Mano de obra','Otro'],
-  'DEUDA GG':['Capitalización / transferencia a Bayas y Frutos','Gasto personal de dirección','Pago de préstamo','Otro'],
+  'DEUDA GG':['Capitalización (50%)','Devolución de préstamos'],
   'OTROS':['Seguros / garantías (AVLA)','Registros (SUNARP)','Plan familiar / gasto personal','Devolución de pago erróneo','Otro']};
 function tiposDe(area){return TIPOS_EGRESO[area]||[];}
 function tipoConMes(t){return /^(Sueldo|Comisión)/.test(t||'');}
@@ -830,7 +836,7 @@ var REGLAS_TIPO=[
   ['MKT',/CLAUDE|CANVA|ADOBE|SOFTWARE|SUSCRIP|WORKSPACE|CHATGPT|OPENAI/,'Herramientas / software'],['MKT',/FACEBK|FACEBOOK|META |GOOGLE ADS|TIKTOK/,'Publicidad pagada (Meta, Google…)'],['MKT',/RELACIONESPUBLICAS|RELACIONES PUBLICAS/,'Relaciones públicas'],['MKT',/SUELDO|HABER|QUINCENA/,'Sueldo'],
   ['OPE Planta',/ESQUEJE|PLANTON/,'Proveedores de esquejes / plantones'],['OPE Planta',/DEV/,'Devolución a proveedor'],['OPE Planta',/FLETE|TRANSPORT/,'Flete / movilidad'],['OPE Planta',/FERTILIZ|RIEGO|ABONO|INSUMO/,'Insumos (fertilizantes, riego…)'],
   ['OPE Comex',/EMPAQUE|ANYVA/,'Empaques'],['OPE Comex',/FLETE|EXPORT|ADUAN/,'Flete / exportación'],
-  ['DEUDA GG',/BAYAS Y FRUTOS/,'Capitalización / transferencia a Bayas y Frutos'],['DEUDA GG',/ROBLES NU.?.?EZ ANA KARINA/,'Gasto personal de dirección'],
+  ['DEUDA GG',/PRESTAMO|PRÉSTAMO|AVANCE|DEVOLUCI/,'Devolución de préstamos'],['DEUDA GG',/./,'Capitalización (50%)'],
   ['OTROS',/AVLA|ALVA|GARANT/,'Seguros / garantías (AVLA)'],['OTROS',/SUNARP/,'Registros (SUNARP)'],['OTROS',/PLAN FAMILIAR/,'Plan familiar / gasto personal'],['OTROS',/ERRONEO|ERRÓNEO|PAGO ERR/,'Devolución de pago erróneo']];
 function tipoSugerido(m){if(!(m.cargo>0)||!tiposDe(m.area).length)return '';var t=cNorm((m.desc||'')+' '+(m.obs||'')+' '+(m.mov||''));
   for(var i=0;i<REGLAS_TIPO.length;i++){var r=REGLAS_TIPO[i];if(r[0]===m.area&&r[1].test(t))return r[2];}return '';}
@@ -896,7 +902,7 @@ function repartirGrupos(m,monto,fn){
 // Reparte un egreso entre áreas de la distribución: normal → su área; costo fijo → según el cuadro
 // (en un costo fijo el área con que se registró, p. ej. ADM, NO recibe el gasto: solo cuenta el cuadro)
 function repartir(m,monto,fn){
-  if(!m.esFijo){fn(m.area,monto);return;}
+  if(!m.esFijo){fn(areaCalc(m),monto);return;}
   repartirGrupos(m,monto,function(g,v){var ar=(g.areas&&g.areas.length)?g.areas:['OTROS'];var p=splitCents(v,ar.map(function(){return 1;}));ar.forEach(function(a,i){fn(a,p[i]);});});
 }
 function repartoTxt(m){var G=gruposDe(ym(m.fecha)),l=gruposReparto(m);return l.length===G.length?'Todas ('+l.length+')':l.map(function(g){return g.l;}).join(', ');}
@@ -2689,20 +2695,22 @@ function estadoResultadosHtml(movs){
     +L('Resultado operativo',ing-egO,'sum')
     +otros.map(function(k){return A[k].eq?L(esc(areaLabel(k)),-A[k].eq,'ind'):'';}).join('')
     +(rev?L('Egresos en REVISAR',-rev,'ind','Sin área asignada'):'')
-    +L('Resultado de la empresa',ing-egO-egX-rev,'tot','Antes de capitalización · Evolution va aparte')
+    +L('Resultado de la empresa',ing-egO-egX-rev,'tot','Antes de la Cuenta Dirección · Evolution va aparte')
     +'</tbody></table></div>'
     +'<div class="cobref"><div class="cobref-h"><b>Cobranza del periodo</b><span>Referencia · no suma al resultado</span><b class="num">'+S(t.cob)+'</b></div>'
     +'<div class="cobref-r tot"><span>Total que entró de clientes al banco<em>ventas + cobranza'+(t.otrosIng?' + otros':'')+(t.otros?' + sin clasificar':'')+'</em></span><b>'+S(ingCli)+'</b></div></div>'
     +'<div class="cobref"><div class="cobref-h"><b>Aparte</b><span>No suma al resultado de la empresa</span></div>'
-    +'<div class="cobref-r"><span>Capitalización Dirección (neta)<em>'+((t.ventas+t.cob)?((cap-t.devGG)/(t.ventas+t.cob)*100).toFixed(1):'0')+'% de ventas + cobranza · meta '+RECOM['DEUDA GG']+'%'+(t.devGG?' · pagado '+S(cap)+' − devuelto '+S(t.devGG):'')+'</em></span><b>'+S(cap-t.devGG)+'</b></div>'
+    +'<div class="cobref-r"><span>Cuenta Dirección · Capitalización (50%)<em>'+((t.ventas+t.cob)?(cap/(t.ventas+t.cob)*100).toFixed(1):'0')+'% de ventas + cobranza · meta '+RECOM['DEUDA GG']+'%</em></span><b>'+S(cap)+'</b></div>'
+    +(A['PREST DIR'].eq?'<div class="cobref-r"><span>Cuenta Dirección · Devolución de préstamos<em>Pachamama le devolvió a Dirección lo que esta le prestó · no es capitalización</em></span><b>'+S(A['PREST DIR'].eq)+'</b></div>':'')
+    +(t.devGG?'<div class="cobref-r"><span>Cuenta Dirección · Préstamo de Dirección<em>Dirección le prestó a Pachamama (Bayas y Frutos / Grupo Inmobiliario)</em></span><b>'+S(t.devGG)+'</b></div>':'')
     +(evo?'<div class="cobref-r"><span>Evolution<em>entidad aparte · su parte de los costos fijos</em></span><b>'+S(evo)+'</b></div>':'')
     +'<div class="cobref-r"><span>Financiamiento recibido<em>préstamos</em></span><b>'+S(t.fin)+'</b></div>'
     +((cm.n||cm.sinPar.length)?'<div class="cobref-r"><span>Cambio de moneda<em>'+(cm.usd?'compra de '+U(cm.usd)+' a TC '+cm.tc.toFixed(3)+' · ':'')+cm.n+' cambio'+(cm.n!==1?'s':'')+(cm.sinPar.length?' · '+cm.sinPar.length+' sin pareja':'')+' · no es gasto</em></span><b>'+S(cm.soles+cm.sinPar.reduce(function(a,m){return a+(m.moneda==='PEN'&&m.cargo>0?m.cargo:0);},0))+'</b></div>':'')
     +(t.interno?'<div class="cobref-r"><span>Transferencias internas</span><b>'+S(t.interno)+'</b></div>':'')
     +'</div>'
-    +'<p class="nota">Ventas y cobranza salen de cómo está clasificado cada ingreso en el banco. El precio por m² es lo que entró en el periodo entre los m² del lote. Capitalización Dirección y Evolution van aparte. Los costos fijos ya van repartidos por área.</p></div>';
+    +'<p class="nota">Ventas y cobranza salen de cómo está clasificado cada ingreso en el banco. El precio por m² es lo que entró en el periodo entre los m² del lote. La Cuenta Dirección y Evolution van aparte. Los costos fijos ya van repartidos por área.</p></div>';
 }
-// Plata que vuelve de Dirección (Bayas y Frutos / Grupo Inmobiliario) clasificada como financiamiento: se descuenta de la capitalización
+// Préstamo de Dirección: plata que entra de Bayas y Frutos / Grupo Inmobiliario clasificada como financiamiento (Cuenta Dirección). Va aparte: no es venta ni se resta de la capitalización
 function esDevolucionGG(m,dir){return m.abono>0&&(m.clas==='FINANCIAMIENTO'||!!(dir&&dir[m.sig]))&&(m.area==='DEUDA GG'||/BAYAS Y FRUTOS|GRUPO INMOBILIARIO ROBLES|INMUEBLES ROBLES/.test(cNorm(m.desc)));}
 // Flujo del periodo para la distribución: base = ventas + cobranza; capitalización neta; cierre con la caja del banco
 function flujoDist(movs){
@@ -2710,9 +2718,9 @@ function flujoDist(movs){
   movs.forEach(function(m){if(cm.set[m.sig])return;
     if(m.abono>0){var s=solesDe(m);if(m.clas==='VENTAS')f.V+=s;else if(m.clas==='COBRANZA')f.C+=s;else if(esDevolucionGG(m,cm.dir))f.devGG+=s;else if(m.clas==='FINANCIAMIENTO'||cm.dir[m.sig])f.fin+=s;else f.otI+=s;}
     if(m.cargo>0)f.egTot+=m.moneda==='USD'?m.cargo*(cm.tc||tcDe(m)):m.cargo;});
-  var A=areasConTC(movs,cm);f.A=A;f.base=f.V+f.C;f.capB=A['DEUDA GG'].eq;f.capN=f.capB-f.devGG;
+  var A=areasConTC(movs,cm);f.A=A;f.base=f.V+f.C;f.capB=A['DEUDA GG'].eq;f.capN=f.capB;f.devP=A['PREST DIR'].eq;
   f.areas=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'];f.gA=f.areas.reduce(function(a,k){return a+A[k].eq;},0);
-  f.ot=f.egTot-f.capB-f.gA;f.res=f.base-f.capN-f.gA-f.ot;f.caja=f.res+f.fin+f.otI;
+  f.ot=f.egTot-f.capB-f.devP-f.gA;f.res=f.base-f.capN-f.gA-f.ot;f.caja=f.res+f.devGG-f.devP+f.fin+f.otI;
   // Lo que dice el banco (soles + dólares al TC del mes)
   var y=CV.ym,y1=y.length===4?(Object.keys(DB.saldos).filter(function(k){return k.slice(0,4)===y;}).sort().pop()||''):y,y0=y.length===4?(y-1)+'-12':ymPrev(y);
   var s0=DB.saldos[y0],s1=DB.saldos[y1];
@@ -2732,10 +2740,12 @@ function distribucionHtml(movs){
   var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución del ingreso</h2><div class="card-sub">Base: lo que entró de clientes (ventas + cobranza) · cierra con la caja del banco</div></div></div>'
     +'<div class="tablewrap"><table class="table er dist"><thead><tr><th></th><th class="num">S/</th><th class="num">%</th><th class="num">Recom.</th><th></th></tr></thead><tbody>'
     +fila('Entró de clientes',b,null,'sum','ventas '+S(f.V)+' · cobranza '+S(f.C))
-    +fila('Capitalización Dirección',f.capN,RECOM['DEUDA GG'],'',f.devGG?'pagado '+S(f.capB)+' − devuelto '+S(f.devGG):'','-')
+    +fila('Cuenta Dirección · Capitalización',f.capN,RECOM['DEUDA GG'],'','','-')
     +fila('Áreas',f.gA,recA,'','<span>'+f.areas.filter(function(k){return f.A[k].eq;}).map(function(k){var p=b?f.A[k].eq/b*100:0,ex=p>RECOM[k]+0.05;return esc(areaLabel(k))+' '+p.toFixed(1)+'%'+(ex?' <b class="neg">▲'+RECOM[k]+'%</b>':'');}).join(' · ')+'</span>','-')
     +(Math.abs(f.ot)>0.5?fila('Banco, Evolution y otros',f.ot,null,'','','-'):'')
     +fila('Resultado con clientes',f.res,null,'sum','','')
+    +(f.devGG?fila('+ Préstamo de Dirección',f.devGG,null,'','Cuenta Dirección · Dirección le prestó a Pachamama','+'):'')
+    +(f.devP?fila('− Devolución de préstamos a Dirección',f.devP,null,'','Cuenta Dirección · Pachamama le devolvió a Dirección','-'):'')
     +(f.fin?fila('+ Financiamiento recibido',f.fin,null,'','préstamos y socios','+'):'')
     +(f.otI?fila('+ Otros ingresos',f.otI,null,'','reembolsos, intereses o sin clasificar','+'):'')
     +(Math.abs(f.dtc)>0.5?'<tr><td>'+(f.dtc<0?'− ':'+ ')+'Cambio de moneda<div class="sub">compra/venta de dólares y tipo de cambio</div></td><td class="num">'+(f.dtc<0?'('+S(-f.dtc)+')':S(f.dtc))+'</td><td></td><td></td><td></td></tr>':'')
@@ -2745,7 +2755,7 @@ function distribucionHtml(movs){
     h+='<p class="nota" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+(Math.abs(d)<1?'<span class="pill ok">'+ico('check')+' Cuadra con el banco</span>':'<span class="pill warn">Diferencia '+S(Math.abs(d))+'</span>')
       +'<span>Banco: saldo de '+S(f.s0.soles)+(+f.s0.dolares?' + '+U(+f.s0.dolares):'')+' a '+S(f.s1.soles)+(+f.s1.dolares?' + '+U(+f.s1.dolares):'')+' = '+(f.banco<0?'baja ':'sube ')+S(Math.abs(f.banco))+'</span>'
       +(Math.abs(d)>=1?'<span class="muted">(falta cargar o corregir algún movimiento del periodo)</span>':'')+'</p>';}
-  return h+'<p class="nota">Capitalización y áreas se miden contra lo que entró de clientes (meta 50% y 50%). La capitalización es neta: lo pagado a Dirección menos lo que Bayas y Frutos o Grupo Inmobiliario devolvieron. ▲ = el área pasó su % recomendado.</p></div>';
+  return h+'<p class="nota">La capitalización (Cuenta Dirección) y las áreas se miden contra lo que entró de clientes (meta 50% y 50%). Los préstamos de Dirección y sus devoluciones van aparte: no son capitalización. ▲ = el área pasó su % recomendado.</p></div>';
 }
 // Sección que se abre y se cierra; recuerda si quedó abierta
 function plegable(id,titulo,resumen,cuerpo){return '<details class="card concsteps plegable" data-sec="'+id+'"'+(CV.sec&&CV.sec[id]?' open':'')+'><summary><span class="card-title" style="font-size:16px">'+titulo+'</span><span class="muted" style="font-size:12.5px">'+resumen+'</span>'+ico('caret-down')+'</summary><div class="plg-in">'+cuerpo+'</div></details>';}
