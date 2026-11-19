@@ -504,6 +504,7 @@ details.concsteps>:last-child{margin-bottom:18px}
 .cm-amt{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .cm-amt .bigamt{font-size:26px;font-weight:800}
 .cm-sec{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--gr-border);border-radius:14px;background:var(--gr-surface-2)}
+.cand-row{display:flex;flex-direction:column;gap:4px}.cxRol{margin:0 0 6px 34px;font-size:12.5px;padding:4px 6px;border-radius:8px;border:1px solid var(--line,#ddd);background:var(--card,#fff);color:inherit;max-width:calc(100% - 34px)}
 .candlist{display:flex;flex-direction:column;gap:6px;max-height:300px;overflow:auto}
 .cand{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;border:1px solid var(--gr-border);background:var(--gr-surface);cursor:pointer}
 .cand.on{border-color:var(--gr-action);background:var(--gr-action-50)}
@@ -1514,16 +1515,18 @@ function renderMes(){
     movs.forEach(function(m){if(m.cargo>0&&m.area==='DEUDA GG'){if(esDevPrestamo(m))ad(tipoPrestamo(m)==='cap'?'pcapOut':'pdirOut',m,m.cargo);else ad('cap',m,m.cargo);}
       else if(m.abono>0){var tp=tipoPrestamo(m);if(tp)ad(tp==='cap'?'pcapIn':'pdirIn',m,m.abono);}});
     function mon(r){return (r.s||!r.u?S(r.s):'')+(r.u?(r.s?' + ':'')+'<span class="usd">'+U(r.u)+'</span>':'');}
-    function sal(a,b){var x={s:a.s-b.s,u:a.u-b.u,n:0};return '<span class="'+(x.s<-0.005||x.u<-0.005?'neg':'')+'">'+(Math.abs(x.s)>0.005||!Math.abs(x.u)?S(x.s):'')+(Math.abs(x.u)>0.005?(Math.abs(x.s)>0.005?' + ':'')+'<span class="usd">'+U(x.u)+'</span>':'')+'</span>';}
+    function sal(a,b){var s=a.s-b.s,u=a.u-b.u,neg=s<-0.005||u<-0.005,pos=s>0.005||u>0.005;if(neg&&!pos){s=-s;u=-u;}
+      var t=(Math.abs(s)>0.005||Math.abs(u)<=0.005?S(s):'')+(Math.abs(u)>0.005?(Math.abs(s)>0.005?' + ':'')+'<span class="usd">'+U(u)+'</span>':'');
+      return t+'<div class="sub">'+(neg&&!pos?'devuelto':pos&&!neg?'por devolver':!pos&&!neg?'al día':'saldo (entró − devuelto)')+'</div>';}
     function ver(k,n){return n?'<button type="button" class="btn btn-ghost btn-sm dirVer" data-f="'+k+'">'+ico('eye')+'Ver '+n+'</button>':'<span class="muted3">—</span>';}
     var dg=dn.rows.filter(function(r){return r.area==='DEUDA GG';})[0]||{pct:0,recom:50},st=dg.pct>dg.recom+0.05;
     return '<div class="card"><div class="card-head"><div><h2 class="card-title">Cuenta Dirección '+Y+'</h2><div class="card-sub">Lo que va a Dirección y los préstamos con Dirección · toca <b>Ver</b> para revisar cada movimiento</div></div></div>'
       +'<div class="tablewrap"><table class="table cards"><thead><tr><th>Ítem</th><th class="num">Entró</th><th class="num">Salió</th><th class="num">Resultado</th><th></th></tr></thead><tbody>'
       +'<tr><td class="full"><div class="areacell">'+areaDot('DEUDA GG')+'<b>Capitalización '+Y+'</b></div><div class="sub">Lo que va a Dirección · única que cuenta para la meta del 50%</div></td><td class="num" data-l="Entró"><span class="muted3">—</span></td><td class="num" data-l="Salió">'+mon(R.cap)+'</td>'
         +'<td class="num" data-l="Resultado">'+(dn.base?'<span class="pill '+(st?'ex':'ok')+'">'+dg.pct.toFixed(1)+'% de lo que entró</span><div class="sub">meta '+dg.recom+'%</div>':'<span class="muted3">sin ventas ni cobranza</span>')+'</td><td data-l="">'+ver('dircap',R.cap.n)+'</td></tr>'
-      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamos capitalización '+Y+'</b></div><div class="sub">Dirección adelanta plata a cuenta de su capitalización y Pachamama se la devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pcapIn)+'</td><td class="num" data-l="Salió">'+mon(R.pcapOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pcapIn,R.pcapOut)+'<div class="sub">por devolver</div></td><td data-l="">'+ver('dirpcap',R.pcapIn.n+R.pcapOut.n)+'</td></tr>'
-      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamo directo '+Y+'</b></div><div class="sub">Dirección le presta a Pachamama (planilla, recargas, etc.) y Pachamama se lo devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pdirIn)+'</td><td class="num" data-l="Salió">'+mon(R.pdirOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pdirIn,R.pdirOut)+'<div class="sub">por devolver</div></td><td data-l="">'+ver('dirpdir',R.pdirIn.n+R.pdirOut.n)+'</td></tr>'
-      +'</tbody></table></div><p class="nota">Los préstamos no cuentan para el 50%. «Por devolver» es lo que entró menos lo que se devolvió en este período (negativo = se devolvió más de lo que entró en el período).</p></div>';})();
+      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamos capitalización '+Y+'</b></div><div class="sub">Dirección adelanta plata a cuenta de su capitalización y Pachamama se la devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pcapIn)+'</td><td class="num" data-l="Salió">'+mon(R.pcapOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pcapIn,R.pcapOut)+'</td><td data-l="">'+ver('dirpcap',R.pcapIn.n+R.pcapOut.n)+'</td></tr>'
+      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamo directo '+Y+'</b></div><div class="sub">Dirección le presta a Pachamama (planilla, recargas, etc.) y Pachamama se lo devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pdirIn)+'</td><td class="num" data-l="Salió">'+mon(R.pdirOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pdirIn,R.pdirOut)+'</td><td data-l="">'+ver('dirpdir',R.pdirIn.n+R.pdirOut.n)+'</td></tr>'
+      +'</tbody></table></div><p class="nota">Los préstamos no cuentan para el 50%. «Por devolver» = entró más de lo que se devolvió en el período; «Devuelto» = en el período se devolvió (préstamos de meses anteriores). Las compras de dólares van en Cambio de moneda, no aquí.</p></div>';})();
   // Otros egresos
   var ds=distSeg(movs),sT=0,sU=0,sO=0;ds.forEach(function(d){sT+=d.gastado;sU+=d.gastadoU;sO+=d.ops;});
   var segCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Otros egresos</h2><div class="card-sub">Fuera del núcleo · no afectan el 100%</div></div></div>'
@@ -2335,20 +2338,30 @@ function abrirEnlaceCambio(sig){
   var g=m.cambioGrupo||nuevoGrupoCambio(m),sel={};movsGrupo(m.cambioGrupo).forEach(function(x){sel[sigOf(x)]=1;});sel[sig]=1;
   if(!m.cambioGrupo){var p=pareceCambio(m)?parejaSugerida(m):null;if(p){sel[sigOf(p)]=1;var en=m.abono>0?m:p.abono>0?p:null;if(en&&en.moneda==='USD')pagosSugeridos(en).forEach(function(x){sel[sigOf(x)]=1;});}}
   var area=m.cambioArea||(/\bMKT\b|MARKETING/i.test(m.obs||'')?'MKT':'');
-  var cands=allMovs().filter(function(x){return sigOf(x)!==sig&&cDias(x.fecha,m.fecha)<=10&&(!x.cambioGrupo||x.cambioGrupo===m.cambioGrupo)&&(pareceCambio(x)||(x.cargo>0&&x.moneda==='USD'&&x.area!=='BANCO')||(x.abono>0&&(x.clas==='FINANCIAMIENTO'||esClasPrestamo(x.clas))&&cDias(x.fecha,m.fecha)<=3)||sel[sigOf(x)]);})
+  // Papel de cada movimiento en el grupo (sirve para cualquier área): 'cambio' (salida o entrada del cambio), 'pago' (gasto hecho con esa moneda) o 'directo' (dólares que Dirección pasó sin cambio = préstamo)
+  var rol={};function rolIni(x){if(x.cargo>0)return tramoCambio(x)?'cambio':'pago';if(x.moneda==='USD'&&(x.clas==='FINANCIAMIENTO'||esClasPrestamo(x.clas)))return 'directo';return 'cambio';}
+  function rolDe(x){var k=sigOf(x);return rol[k]||(rol[k]=rolIni(x));}
+  function conRol(x,areaSel){var r=rolDe(x),c={};
+    if(x.cargo>0){if(r==='cambio')c.area='CAMBIO';else if(x.area==='CAMBIO')c.area=areaSel||x.cambioArea||'REVISAR';}
+    else{if(r==='cambio')c.clas='CAMBIO';else if(r==='directo'&&!(x.clas==='FINANCIAMIENTO'||esClasPrestamo(x.clas)))c.clas='PRESTAMO_DIR';}
+    return c;}
+  function rolSel(x){var k=sigOf(x),r=rolDe(x),o=x.cargo>0?[['cambio','Salida del cambio (con esto se compraron/vendieron)'],['pago','Pago hecho con esa moneda']]:x.moneda==='USD'?[['cambio','Entrada del cambio (dólares comprados)'],['directo','Dólares directos de Dirección (préstamo)']]:[['cambio','Entrada del cambio']];
+    return '<select class="cxRol" data-k="'+encodeURIComponent(k)+'" aria-label="Papel en el cambio">'+o.map(function(a){return '<option value="'+a[0]+'"'+(a[0]===r?' selected':'')+'>'+a[1]+'</option>';}).join('')+'</select>';}
+  var cands=allMovs().filter(function(x){return sigOf(x)!==sig&&cDias(x.fecha,m.fecha)<=10&&(!x.cambioGrupo||x.cambioGrupo===m.cambioGrupo)&&(pareceCambio(x)||(x.cargo>0&&x.moneda==='USD'&&x.area!=='BANCO')||(x.cargo>0&&x.moneda==='PEN'&&x.area!=='BANCO'&&cDias(x.fecha,m.fecha)<=1)||(x.abono>0&&(x.clas==='FINANCIAMIENTO'||esClasPrestamo(x.clas))&&cDias(x.fecha,m.fecha)<=3)||sel[sigOf(x)]);})
     .sort(function(a,b){return (sel[sigOf(b)]?1:0)-(sel[sigOf(a)]?1:0)||(a.fecha<b.fecha?-1:1);});
   var old=$('concModal');if(old)old.remove();
   var w=document.createElement('div');w.id='concModal';w.className='modal-bg';
   w.innerHTML='<div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="cxT"><div class="cm-head"><div><h3 id="cxT">Cambio de moneda</h3><div class="muted" style="font-size:13px;margin-top:4px">Une la salida, la entrada y los pagos hechos con esa moneda</div></div><button class="x" id="cmX" aria-label="Cerrar">'+ico('x')+'</button></div>'
     +'<label class="pfield">Área que pidió el cambio<select id="cxArea"><option value="">—</option>'+CAMBIO_AREAS.map(function(a){return '<option value="'+a+'"'+(area===a?' selected':'')+'>'+esc(areaLabel(a))+'</option>';}).join('')+'</select></label>'
-    +'<div class="cm-sec"><b>Movimientos del cambio</b><span class="muted" style="font-size:12.5px">Marca la salida, la entrada en la otra moneda y los pagos que se hicieron con ella. Los marcados ya vienen sugeridos. <b>Si los dólares entraron directo desde otra cuenta</b> (Bayas, Evolution…) sin comprarlos, marca solo esa entrada y los pagos: queda como «Dólares directos» y la entrada cuenta como financiamiento.</span><div class="candlist" id="cxList"></div><div class="cm-sum" id="cxSum"></div></div>'
+    +'<div class="cm-sec"><b>Movimientos del cambio</b><span class="muted" style="font-size:12.5px">Marca la salida, la entrada en la otra moneda y los pagos que se hicieron con ella. Los marcados ya vienen sugeridos. En cada marcado elige su <b>papel</b>: los soles con que se compraron los dólares van como <b>Salida del cambio</b> (aunque estén en MKT u otra área), los dólares comprados como <b>Entrada del cambio</b> y lo que se pagó con ellos como <b>Pago</b>. Solo si Dirección pasó dólares sin cambio, elige <b>Dólares directos de Dirección</b> (cuenta como préstamo directo).</span><div class="candlist" id="cxList"></div><div class="cm-sum" id="cxSum"></div></div>'
     +'<div class="cm-foot">'+(m.cambioGrupo?'<button class="btn btn-ghost" id="cxDel">'+ico('link-break')+'Deshacer grupo</button>':'')+'<span class="sp"></span><button class="btn btn-secondary" id="cxCan">Cancelar</button><button class="btn btn-primary" id="cxOk">Guardar</button></div></div>';
   document.body.appendChild(w);
   function lista(){
     $('cxList').innerHTML=[m].concat(cands).map(function(x){var k=sigOf(x),u=x.moneda==='USD';
-      return '<label class="cand'+(sel[k]?' on':'')+'"><input type="checkbox" class="chk" data-k="'+encodeURIComponent(k)+'"'+(sel[k]?' checked':'')+(k===sig?' disabled':'')+'><span class="cd"><b>'+esc(x.desc||x.mov)+'</b><span>'+dmy(x.fecha)+' · '+(u?'Dólares':'Soles')+' · '+(esMovCambio(x)?'Cambio de moneda':esc(areaLabel(x.area)))+(x.obs?' · '+esc(x.obs):'')+'</span></span><b class="cm-m '+(x.cargo>0?'neg':'pos')+'">'+(x.cargo>0?'−':'+')+(u?U(x.cargo||x.abono):S(x.cargo||x.abono))+'</b></label>';}).join('');
+      return '<div class="cand-row"><label class="cand'+(sel[k]?' on':'')+'"><input type="checkbox" class="chk" data-k="'+encodeURIComponent(k)+'"'+(sel[k]?' checked':'')+(k===sig?' disabled':'')+'><span class="cd"><b>'+esc(x.desc||x.mov)+'</b><span>'+dmy(x.fecha)+' · '+(u?'Dólares':'Soles')+' · '+(esMovCambio(x)?'Cambio de moneda':esc(areaLabel(x.area)))+(x.obs?' · '+esc(x.obs):'')+'</span></span><b class="cm-m '+(x.cargo>0?'neg':'pos')+'">'+(x.cargo>0?'−':'+')+(u?U(x.cargo||x.abono):S(x.cargo||x.abono))+'</b></label>'+(sel[k]?rolSel(x):'')+'</div>';}).join('');
+    Array.prototype.forEach.call($('cxList').querySelectorAll('.cxRol'),function(s){s.onchange=function(){rol[decodeURIComponent(s.dataset.k)]=s.value;lista();};});
     Array.prototype.forEach.call($('cxList').querySelectorAll('input[data-k]'),function(c){c.onchange=function(){var k=decodeURIComponent(c.dataset.k);if(c.checked)sel[k]=1;else delete sel[k];lista();};});
-    var r=resumenCambio(Object.keys(sel).map(function(k){return DB.movs[k];}).filter(Boolean)),e=CAMBIO_ESTADO[r.estado];
+    var r=resumenCambio(Object.keys(sel).map(function(k){return DB.movs[k];}).filter(Boolean).map(function(x){return Object.assign({},x,conRol(x,$('cxArea').value));})),e=CAMBIO_ESTADO[r.estado];
     $('cxSum').innerHTML='<span class="pill '+e[0]+'">'+e[1]+'</span> '+(r.tc?'TC pagado <b>'+r.tc.toFixed(3)+'</b>':'')+(r.compra&&r.entraUSD?' · pagos '+U(r.pagado)+' de '+U(r.entraUSD):'');
   }
   lista();
@@ -2359,8 +2372,8 @@ function abrirEnlaceCambio(sig){
     antes.forEach(function(x){if(!nuevo[sigOf(x)]){x.cambioGrupo='';x.cambioArea='';cambios.push(x);}});
     Object.keys(nuevo).forEach(function(k){var x=DB.movs[k];if(!x)return;x.cambioGrupo=g;x.cambioArea=areaSel;
       // la salida y la entrada del cambio quedan como Cambio de moneda
-      if(x.cargo>0&&(x.area==='DVO'||(x.area==='OTROS'&&/MUVEX|DOLAR/i.test((x.desc||'')+' '+(x.obs||'')))||x.area==='REVISAR'))x.area='CAMBIO';
-      if(x.abono>0&&(x.clas==='FINANCIAMIENTO'||!x.clas)&&/MUVEX|DOLAR/i.test((x.desc||'')+' '+(x.obs||'')))x.clas='CAMBIO';
+      // cada movimiento queda según el papel elegido en la ventana (salida/entrada del cambio, pago o dólares directos)
+      Object.assign(x,conRol(x,areaSel));
       cambios.push(x);});
     for(var i=0;i<cambios.length;i++)await updateMov(cambios[i]);
     SILENT=false;setSync('guardado ✓');cerrar();renderActual();
