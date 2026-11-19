@@ -798,7 +798,18 @@ var SEG=['BANCO','DVO','OTROS','EVOLUTION','PREST DIR'];
 //  1) Capitalización (50%): lo único que se mide contra la meta del 50%
 //  2) Devolución de préstamos: Pachamama le devuelve a Dirección lo que esta le prestó → se suma aparte como 'PREST DIR' (no es capitalización)
 //  3) Préstamo de Dirección: ingreso de Bayas y Frutos / Grupo Inmobiliario clasificado como financiamiento (ver esPrestamoDir)
-function esDevPrestamo(m){return m.area==='DEUDA GG'&&m.cargo>0&&/^(Devoluci[oó]n de pr[eé]stamos|Pago de pr[eé]stamo)$/.test(m.concepto||'');}
+// Nombres guardados (sin año); en pantalla se muestran con el año del movimiento o del período (Capitalización 2026, …)
+var DIR_T={cap:'Capitalización (50%)',pcapDev:'Préstamo capitalización · devolución',pdirDev:'Préstamo directo · devolución'};
+function anioDe(x){return String(x||'').slice(0,4)||String(new Date().getFullYear());}
+function esLegacyDev(t){return /^(Devoluci[oó]n de pr[eé]stamos|Pago de pr[eé]stamo)$/.test(t||'');}
+function nomDir(t,fecha){var a=anioDe(fecha);if(/^Capitalizaci/.test(t||''))return 'Capitalización '+a;
+  if(t===DIR_T.pcapDev)return 'Préstamos capitalización '+a+' · devolución';if(t===DIR_T.pdirDev||esLegacyDev(t))return 'Préstamo directo '+a+' · devolución';return t;}
+function clasDir(c,fecha){var a=anioDe(fecha);return c==='PRESTAMO_CAP'?'Préstamos capitalización '+a+' · entra':c==='PRESTAMO_DIR'?'Préstamo directo '+a+' · entra':null;}
+function esClasPrestamo(c){return c==='PRESTAMO_DIR'||c==='PRESTAMO_CAP';}
+function esDevPrestamo(m){return m.area==='DEUDA GG'&&m.cargo>0&&(m.concepto===DIR_T.pcapDev||m.concepto===DIR_T.pdirDev||esLegacyDev(m.concepto));}
+// 'cap' (préstamos capitalización) o 'dir' (préstamo directo) para un movimiento de préstamo con Dirección
+function tipoPrestamo(m){if(m.cargo>0)return !esDevPrestamo(m)?null:(m.concepto===DIR_T.pcapDev?'cap':'dir');if(DIR_CM.set[m.sig])return null;if(m.clas==='PRESTAMO_CAP')return 'cap';return esDevolucionGG(m,DIR_CM.dir)?'dir':null;}
+var DIR_CM={set:{},dir:{}}; // cambios de moneda del período en Movimientos (dólares directos cuentan como préstamo directo, igual que Conciliación)
 function areaCalc(m){return esDevPrestamo(m)?'PREST DIR':m.area;}
 var RECOM={'DEUDA GG':50,'OPE Planta':7,'OPE Infra':20,'OPE Comex':3,'VENTAS':5,'MKT':5,'ADM':10};
 var AREAS=['DEUDA GG','OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM','BANCO','DVO','OTROS','EVOLUTION','CAMBIO','INGRESO','REVISAR'];
@@ -807,7 +818,7 @@ var AREA_LABEL={'CAMBIO':'Cambio de moneda','DEUDA GG':'Cuenta Dirección','PRES
 function areaLabel(a){return AREA_LABEL[a]||a;}
 var AREA_COLOR={'DEUDA GG':'#f87171','PREST DIR':'#fca5a5','OPE Planta':'#34d399','OPE Infra':'#22d3ee','OPE Comex':'#a78bfa','VENTAS':'#fbbf24','MKT':'#f472b6','ADM':'#60a5fa','BANCO':'#94a3b8','DVO':'#c084fc','OTROS':'#64748b','EVOLUTION':'#fb923c','CAMBIO':'#14b8a6','INGRESO':'#22c55e','REVISAR':'#f87171'};
 // Clasificación de ingresos, INDEPENDIENTE del Área (que solo clasifica egresos del núcleo/seguimiento)
-var CLAS_LABEL={'':'—','VENTAS':'Ventas','COBRANZA':'Cobranza','OTROS':'Otros ingresos (reembolsos, intereses…)','PRESTAMO_DIR':'Préstamo de Dirección (Cuenta Dirección)','FINANCIAMIENTO':'Financiamiento (préstamo/socios)','CAMBIO':'Cambio de moneda (compra/venta de dólares)'};
+var CLAS_LABEL={'':'—','VENTAS':'Ventas','COBRANZA':'Cobranza','OTROS':'Otros ingresos (reembolsos, intereses…)','PRESTAMO_CAP':'Préstamos capitalización (entra de Dirección)','PRESTAMO_DIR':'Préstamo directo (entra de Dirección)','FINANCIAMIENTO':'Financiamiento (préstamo/socios)','CAMBIO':'Cambio de moneda (compra/venta de dólares)'};
 function clasLabel(c){return CLAS_LABEL[c||'']||c;}
 var CONCEPTOS_COBRANZA=['Cuota Inicial','Separación','Saldo'];
 var CONCEPTOS_VENTAS=['Cuotas de financiamiento','Inicial','Financiamiento de la inicial'];
@@ -820,7 +831,7 @@ var TIPOS_EGRESO={
   'OPE Planta':['Sueldo / jornal','Proveedores de esquejes / plantones','Insumos (fertilizantes, riego…)','Mantenimiento / maquinaria','Flete / movilidad','Devolución a proveedor','Otro'],
   'OPE Comex':['Sueldo','Empaques','Compra de producto','Flete / exportación','Trámites','Otro'],
   'OPE Infra':['Obra','Materiales','Mano de obra','Otro'],
-  'DEUDA GG':['Capitalización (50%)','Devolución de préstamos'],
+  'DEUDA GG':[DIR_T.cap,DIR_T.pcapDev,DIR_T.pdirDev],
   'OTROS':['Seguros / garantías (AVLA)','Registros (SUNARP)','Plan familiar / gasto personal','Devolución de pago erróneo','Otro']};
 function tiposDe(area){return TIPOS_EGRESO[area]||[];}
 function tipoConMes(t){return /^(Sueldo|Comisión)/.test(t||'');}
@@ -836,14 +847,14 @@ var REGLAS_TIPO=[
   ['MKT',/CLAUDE|CANVA|ADOBE|SOFTWARE|SUSCRIP|WORKSPACE|CHATGPT|OPENAI/,'Herramientas / software'],['MKT',/FACEBK|FACEBOOK|META |GOOGLE ADS|TIKTOK/,'Publicidad pagada (Meta, Google…)'],['MKT',/RELACIONESPUBLICAS|RELACIONES PUBLICAS/,'Relaciones públicas'],['MKT',/SUELDO|HABER|QUINCENA/,'Sueldo'],
   ['OPE Planta',/ESQUEJE|PLANTON/,'Proveedores de esquejes / plantones'],['OPE Planta',/DEV/,'Devolución a proveedor'],['OPE Planta',/FLETE|TRANSPORT/,'Flete / movilidad'],['OPE Planta',/FERTILIZ|RIEGO|ABONO|INSUMO/,'Insumos (fertilizantes, riego…)'],
   ['OPE Comex',/EMPAQUE|ANYVA/,'Empaques'],['OPE Comex',/FLETE|EXPORT|ADUAN/,'Flete / exportación'],
-  ['DEUDA GG',/PRESTAMO|PRÉSTAMO|AVANCE|DEVOLUCI/,'Devolución de préstamos'],['DEUDA GG',/./,'Capitalización (50%)'],
+  ['DEUDA GG',/(PRESTAMO|AVANCE|DEVOLUCI).*CAPITALIZ|CAPITALIZ.*(PRESTAMO|DEVOLUCI)/,'Préstamo capitalización · devolución'],['DEUDA GG',/PRESTAMO|PRÉSTAMO|AVANCE|DEVOLUCI/,'Préstamo directo · devolución'],['DEUDA GG',/./,'Capitalización (50%)'],
   ['OTROS',/AVLA|ALVA|GARANT/,'Seguros / garantías (AVLA)'],['OTROS',/SUNARP/,'Registros (SUNARP)'],['OTROS',/PLAN FAMILIAR/,'Plan familiar / gasto personal'],['OTROS',/ERRONEO|ERRÓNEO|PAGO ERR/,'Devolución de pago erróneo']];
 function tipoSugerido(m){if(!(m.cargo>0)||!tiposDe(m.area).length)return '';var t=cNorm((m.desc||'')+' '+(m.obs||'')+' '+(m.mov||''));
   for(var i=0;i<REGLAS_TIPO.length;i++){var r=REGLAS_TIPO[i];if(r[0]===m.area&&r[1].test(t))return r[2];}return '';}
 // Desglose de egresos por área y tipo (S/ con dólares al TC del mes) + sugerencias pendientes
 function egresosTipoData(movs){var A={},sug=[];
   movs.forEach(function(m){if(!(m.cargo>0)||!tiposDe(m.area).length||esMovCambio(m))return;var v=montoPEN(m,true),a=A[m.area]=A[m.area]||{area:m.area,t:0,tipos:{},sin:0,nSin:0,atr:0};a.t+=v;
-    if(m.concepto){a.tipos[m.concepto]=(a.tipos[m.concepto]||0)+v;if(esAtrasado(m))a.atr+=v;}else{a.sin+=v;a.nSin++;var s=tipoSugerido(m);if(s)sug.push({m:m,s:s});}});
+    if(m.concepto){var tk=m.area==='DEUDA GG'?nomDir(m.concepto,m.fecha):m.concepto;a.tipos[tk]=(a.tipos[tk]||0)+v;if(esAtrasado(m))a.atr+=v;}else{a.sin+=v;a.nSin++;var s=tipoSugerido(m);if(s)sug.push({m:m,s:s});}});
   return {areas:Object.keys(A).map(function(k){return A[k];}).sort(function(x,y){return y.t-x.t;}),sug:sug};}
 function egresosTipoHtml(movs){var D=egresosTipoData(movs);if(!D.areas.length)return '';
   var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Egresos por tipo</h2><div class="card-sub">En qué se gastó cada área · S/ con dólares al TC del mes · según el área anotada en cada egreso</div></div>'
@@ -860,9 +871,9 @@ function wireTipoSug(root,movs){Array.prototype.forEach.call(root.querySelectorA
     logs.push({usuario:USUARIO?USUARIO.email:'',tabla:'movimientos',clave:sigOf(m),accion:'tipo_sugerido',antes:{concepto:''},despues:{concepto:m.concepto}});}
   SILENT=false;var r=await sb.from('conciliacion_log').insert(logs);if(r.error)console.warn('historial',r.error.message);
   toast('Tipo puesto en '+D.sug.length+' egreso'+(D.sug.length!==1?'s':''));renderActual();};});}
-function tipoOpts(area,actual,sug){var ls=tiposDe(area),sel=actual||sug||'';
-  return '<option value="">— Sin tipo —</option>'+ls.map(function(t){return '<option value="'+esc(t)+'"'+(t===sel?' selected':'')+'>'+esc(t)+(t===sug&&!actual?' (sugerido)':'')+'</option>';}).join('')
-    +(actual&&ls.indexOf(actual)===-1?'<option value="'+esc(actual)+'" selected>'+esc(actual)+'</option>':'');}
+function tipoOpts(area,actual,sug,fecha){var ls=tiposDe(area),sel=actual||sug||'';function nm(t){return area==='DEUDA GG'?nomDir(t,fecha):t;}
+  return '<option value="">— Sin tipo —</option>'+ls.map(function(t){return '<option value="'+esc(t)+'"'+(t===sel?' selected':'')+'>'+esc(nm(t))+(t===sug&&!actual?' (sugerido)':'')+'</option>';}).join('')
+    +(actual&&ls.indexOf(actual)===-1?'<option value="'+esc(actual)+'" selected>'+esc(nm(actual))+'</option>':'');}
 var REGLAS=[['MUVEX','CAMBIO'],['COMPRA DE DOLARES','CAMBIO'],['VENTA DOLARES','CAMBIO'],['ITF','BANCO'],['N/D I-BANC','BANCO'],['N/D MEGA','BANCO'],['N/D AUTORIZADA','BANCO'],['COMISION','BANCO'],['MANTENIMIENTO','BANCO'],['PORTES','BANCO'],['I-BANC + COM','BANCO'],['BAYAS Y FRUTOS','OPE Planta'],['PAJUELO ESPINO','OPE Planta'],['ENTEL','ADM'],['PAGO DE SERVICIOS','ADM'],['GRUPO INMOBILIARIO ROBLES','DEUDA GG'],['ROBLES NU','DEUDA GG'],['IZIPAY','INGRESO'],['DEP.EFECTIVO','INGRESO'],['EVOLUTION EMBOLSOS','INGRESO']];
 // Tipo de cambio del mes: el guardado en la nube manda; si no hay, el valor por defecto de TC
 function getTC(ymStr){var s=DB.saldos[ymStr];if(s&&s.tc)return s.tc;return TC[+ymStr.slice(5,7)]||3.47;}
@@ -1497,27 +1508,34 @@ function renderMes(){
     +'<div class="tablewrap only-d"><table class="table"><thead><tr><th>Área</th><th class="num">Gastado S/</th><th class="num">Gastado $</th><th class="num">De costos fijos</th><th>% de lo que entró vs recomendado</th><th>Status</th></tr></thead><tbody>'+dRows+dTot+'</tbody></table></div>'
     +'<div class="barlist only-m">'+dMob+'</div>'
     +'<p class="nota">Soles y dólares se muestran por separado. Solo para el % se suman los dólares al TC del mes ('+tc.toFixed(3)+').</p></div>';
+  // Cuenta Dirección del período: capitalización (meta 50%) y los dos tipos de préstamo, con su "Ver" para revisar cada movimiento
+  var dirCard=(function(){var enP=f.rango?function(x){return (!f.d||x>=f.d)&&(!f.h||x<=f.h);}:function(x){return x.slice(0,7)===f.ym;};var cm=cambiosMoneda(enP);DIR_CM={set:cm.set||{},dir:cm.dir||{}};var Y=anioDe(f.ym||f.d||f.h||(movs[0]&&movs[0].fecha)),R={};['cap','pcapIn','pcapOut','pdirIn','pdirOut'].forEach(function(k){R[k]={s:0,u:0,n:0};});
+    function ad(k,m,v){var r=R[k];r.n++;if(m.moneda==='USD')r.u+=v;else r.s+=v;}
+    movs.forEach(function(m){if(m.cargo>0&&m.area==='DEUDA GG'){if(esDevPrestamo(m))ad(tipoPrestamo(m)==='cap'?'pcapOut':'pdirOut',m,m.cargo);else ad('cap',m,m.cargo);}
+      else if(m.abono>0){var tp=tipoPrestamo(m);if(tp)ad(tp==='cap'?'pcapIn':'pdirIn',m,m.abono);}});
+    function mon(r){return (r.s||!r.u?S(r.s):'')+(r.u?(r.s?' + ':'')+'<span class="usd">'+U(r.u)+'</span>':'');}
+    function sal(a,b){var x={s:a.s-b.s,u:a.u-b.u,n:0};return '<span class="'+(x.s<-0.005||x.u<-0.005?'neg':'')+'">'+(Math.abs(x.s)>0.005||!Math.abs(x.u)?S(x.s):'')+(Math.abs(x.u)>0.005?(Math.abs(x.s)>0.005?' + ':'')+'<span class="usd">'+U(x.u)+'</span>':'')+'</span>';}
+    function ver(k,n){return n?'<button type="button" class="btn btn-ghost btn-sm dirVer" data-f="'+k+'">'+ico('eye')+'Ver '+n+'</button>':'<span class="muted3">—</span>';}
+    var dg=dn.rows.filter(function(r){return r.area==='DEUDA GG';})[0]||{pct:0,recom:50},st=dg.pct>dg.recom+0.05;
+    return '<div class="card"><div class="card-head"><div><h2 class="card-title">Cuenta Dirección '+Y+'</h2><div class="card-sub">Lo que va a Dirección y los préstamos con Dirección · toca <b>Ver</b> para revisar cada movimiento</div></div></div>'
+      +'<div class="tablewrap"><table class="table cards"><thead><tr><th>Ítem</th><th class="num">Entró</th><th class="num">Salió</th><th class="num">Resultado</th><th></th></tr></thead><tbody>'
+      +'<tr><td class="full"><div class="areacell">'+areaDot('DEUDA GG')+'<b>Capitalización '+Y+'</b></div><div class="sub">Lo que va a Dirección · única que cuenta para la meta del 50%</div></td><td class="num" data-l="Entró"><span class="muted3">—</span></td><td class="num" data-l="Salió">'+mon(R.cap)+'</td>'
+        +'<td class="num" data-l="Resultado">'+(dn.base?'<span class="pill '+(st?'ex':'ok')+'">'+dg.pct.toFixed(1)+'% de lo que entró</span><div class="sub">meta '+dg.recom+'%</div>':'<span class="muted3">sin ventas ni cobranza</span>')+'</td><td data-l="">'+ver('dircap',R.cap.n)+'</td></tr>'
+      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamos capitalización '+Y+'</b></div><div class="sub">Dirección adelanta plata a cuenta de su capitalización y Pachamama se la devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pcapIn)+'</td><td class="num" data-l="Salió">'+mon(R.pcapOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pcapIn,R.pcapOut)+'<div class="sub">por devolver</div></td><td data-l="">'+ver('dirpcap',R.pcapIn.n+R.pcapOut.n)+'</td></tr>'
+      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamo directo '+Y+'</b></div><div class="sub">Dirección le presta a Pachamama (planilla, recargas, etc.) y Pachamama se lo devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pdirIn)+'</td><td class="num" data-l="Salió">'+mon(R.pdirOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pdirIn,R.pdirOut)+'<div class="sub">por devolver</div></td><td data-l="">'+ver('dirpdir',R.pdirIn.n+R.pdirOut.n)+'</td></tr>'
+      +'</tbody></table></div><p class="nota">Los préstamos no cuentan para el 50%. «Por devolver» es lo que entró menos lo que se devolvió en este período (negativo = se devolvió más de lo que entró en el período).</p></div>';})();
   // Otros egresos
   var ds=distSeg(movs),sT=0,sU=0,sO=0;ds.forEach(function(d){sT+=d.gastado;sU+=d.gastadoU;sO+=d.ops;});
   var segCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Otros egresos</h2><div class="card-sub">Fuera del núcleo · no afectan el 100%</div></div></div>'
     +'<table class="table cards"><tbody>'+ds.map(function(d){return '<tr><td class="full"><div class="areacell">'+areaDot(d.area)+esc(areaLabel(d.area))+'</div></td><td class="num" data-l="Soles">'+S(d.gastado)+'</td><td class="num usd" data-l="Dólares">'+(d.gastadoU?U(d.gastadoU):'—')+'</td><td class="num muted" data-l="Ops">'+d.ops+' ops</td></tr>';}).join('')
     +'<tr class="total"><td>Subtotal</td><td class="num" data-l="Soles">'+S(sT)+'</td><td class="num usd" data-l="Dólares">'+(sU?U(sU):'—')+'</td><td class="num" data-l="Ops">'+sO+' ops</td></tr></tbody></table>'
-    +(function(){ // Préstamos de Dirección: lo que entró de Bayas y Frutos / Grupo Inmobiliario como préstamo, frente a lo que se le devolvió
-      var pS=0,pU=0,pN=0;movs.forEach(function(m){if(esDevolucionGG(m)){pN++;if(m.moneda==='USD')pU+=m.abono;else pS+=m.abono;}});
-      var dv=ds.filter(function(d){return d.area==='PREST DIR';})[0]||{gastado:0,gastadoU:0,ops:0};
-      if(!pN&&!dv.ops)return '';
-      var nS=pS-dv.gastado,nU=pU-dv.gastadoU;
-      return '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--gr-border)"><div style="font-weight:700;margin-bottom:6px">Préstamos de Dirección</div><table class="table cards"><tbody>'
-        +'<tr><td class="full"><div class="areacell">'+areaDot('DEUDA GG')+'Préstamo de Dirección · entró</div><div class="sub">Dirección le prestó a Pachamama (Bayas y Frutos / Grupo Inmobiliario)</div></td><td class="num pos" data-l="Soles">'+S(pS)+'</td><td class="num usd" data-l="Dólares">'+(pU?U(pU):'—')+'</td><td class="num muted" data-l="Ops">'+pN+' ops</td></tr>'
-        +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'Devolución de préstamos · salió</div><div class="sub">Pachamama le devolvió a Dirección</div></td><td class="num neg" data-l="Soles">('+S(dv.gastado)+')</td><td class="num usd" data-l="Dólares">'+(dv.gastadoU?'('+U(dv.gastadoU)+')':'—')+'</td><td class="num muted" data-l="Ops">'+dv.ops+' ops</td></tr>'
-        +'<tr class="total"><td>'+(nS>=0?'Pachamama le debe a Dirección (del mes)':'Se devolvió más de lo que entró (del mes)')+'</td><td class="num" data-l="Soles">'+S(Math.abs(nS))+'</td><td class="num usd" data-l="Dólares">'+(nU?U(Math.abs(nU)):'—')+'</td><td></td></tr></tbody></table>'
-        +'<p class="nota" style="margin:6px 0 0">Los préstamos no cuentan para el 50% de Cuenta Dirección: solo la capitalización.</p></div>';})()
     +'</div>';
   var persCard=READONLY?'':'<div class="card"><details class="more" id="persDetMov"'+(PERS_MOV_OPEN?' open':'')+'><summary>'+ico('users-three')+'Personal de la empresa<span class="sp"></span><span class="muted" style="font-weight:500;font-size:12.5px">'+DB.asesores.filter(function(a){return !a.fecha_fin||a.fecha_fin>=iso(new Date());}).length+' activos · todas las áreas</span><i class="ph ph-caret-down cr"></i></summary><div class="in">'
     +'<p class="nota" style="margin-top:0">Aquí se agrega, se cambia de área o se da de baja a cualquier persona (Ventas, Cobranza, Administración…). Lo que pongas aquí es lo que aparece al elegir <b>Personal</b> en un egreso, <b>Asesor</b> en una venta y <b>Encargado</b> en una cobranza.</p>'
     +renderAsesorMgmt('','todos')+'</div></details></div>';
-  box.innerHTML=hero+distCard+segCard+egresosTipoHtml(movs)+'<div class="card" id="detCard"></div>'+persCard;
+  box.innerHTML=hero+distCard+dirCard+segCard+egresosTipoHtml(movs)+'<div class="card" id="detCard"></div>'+persCard;
   wireTipoSug(box,movs);
+  Array.prototype.forEach.call(box.querySelectorAll('.dirVer'),function(b){b.onclick=function(){FILTER=b.dataset.f;SEARCH='';SEL=null;renderDetalle();var d=$('detCard');if(d)d.scrollIntoView({behavior:'smooth',block:'start'});};});
   var pdm=$('persDetMov');if(pdm){pdm.ontoggle=function(){PERS_MOV_OPEN=pdm.open;};wireAsesorMgmt('');}
   var stc=$('saveTc');
   if(stc)stc.onclick=function(){var v=+$('tcMes').value;if(!(v>0)){alert('Escribe un tipo de cambio válido.');return;}guardarTC(f.ym,v).then(renderActual);};
@@ -1525,16 +1543,16 @@ function renderMes(){
   if(gr)gr.onclick=function(){FILTER='rev';SEARCH='';var r=movsFiltro().filter(function(m){return m.area==='REVISAR';})[0];SEL=r?sigOf(r):null;renderDetalle();$('detCard').scrollIntoView({behavior:'smooth',block:'start'});if(SEL)abrirPanelMovil();};
   renderDetalle();
 }
-function movTexto(m){return [dmy(m.fecha),m.mov,m.desc,m.moneda,String(monto(m)),fmtMon(m),esIngreso(m)?'ingreso':'egreso',areaLabel(m.area),esIngreso(m)?clasLabel(m.clas):'',m.asesor,m.personal,m.obs||'',m.esFijo?'fijo':'',!esIngreso(m)?(m.concepto||'')+(esAtrasado(m)?' atrasado':''):''].join(' ').toLowerCase();}
+function movTexto(m){return [dmy(m.fecha),m.mov,m.desc,m.moneda,String(monto(m)),fmtMon(m),esIngreso(m)?'ingreso':'egreso',areaLabel(m.area),esIngreso(m)?clasLabel(m.clas):'',m.asesor,m.personal,m.obs||'',m.esFijo?'fijo':'',!esIngreso(m)?(m.concepto||'')+' '+(m.area==='DEUDA GG'?nomDir(m.concepto,m.fecha):'')+(esAtrasado(m)?' atrasado':''):(clasDir(m.clas,m.fecha)||'')].join(' ').toLowerCase();}
 function cambioTag(m){if(!m.cambioGrupo)return '<span class="pill ex" title="Falta enlazar la salida, la entrada y los pagos">sin enlazar</span>';var r=resumenCambio(movsGrupo(m.cambioGrupo)),e=CAMBIO_ESTADO[r.estado];return (m.cambioArea?'<span class="s">'+esc(areaLabel(m.cambioArea))+'</span>':'')+'<span class="pill '+e[0]+'">'+e[1]+(r.tc?' · TC '+r.tc.toFixed(3):'')+'</span>';}
 function clsHtml(m){var h=clsHtml0(m);if(m.bot!=='auto')return h;var p='<span class="pill brand botpill" title="Clasificado por el bot · falta revisar">'+ico('robot')+'Bot</span>';return h.indexOf('<div class="clsline">')===0?h.replace('<div class="clsline">','<div class="clsline">'+p):p+h;}
 function clsHtml0(m){
-  if(esIngreso(m)){var c=m.clas;var col=c==='VENTAS'?'#16a34a':c==='COBRANZA'?'#0ea5e9':c==='OTROS'?'#64748b':c==='PRESTAMO_DIR'?'#f87171':c==='FINANCIAMIENTO'?'#a78bfa':c==='CAMBIO'?'#14b8a6':'#94a3b8';
-    return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+col+'"></span>'+esc(c==='CAMBIO'?'Cambio de moneda':c?clasLabel(c):'Sin clasificar')+'</span>'+(c==='CAMBIO'?cambioTag(m):'')+(m.asesor?'<span class="s">'+esc(m.asesor)+'</span>':'')+'</div>';}
+  if(esIngreso(m)){var c=m.clas;var col=c==='VENTAS'?'#16a34a':c==='COBRANZA'?'#0ea5e9':c==='OTROS'?'#64748b':c==='PRESTAMO_DIR'||c==='PRESTAMO_CAP'?'#f87171':c==='FINANCIAMIENTO'?'#a78bfa':c==='CAMBIO'?'#14b8a6':'#94a3b8';
+    return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+col+'"></span>'+esc(c==='CAMBIO'?'Cambio de moneda':c?(clasDir(c,m.fecha)||clasLabel(c)):'Sin clasificar')+'</span>'+(c==='CAMBIO'?cambioTag(m):'')+(m.asesor?'<span class="s">'+esc(m.asesor)+'</span>':'')+'</div>';}
   if(m.esFijo)return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:var(--gr-brand)"></span>Costo fijo</span><span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>'+esc(repartoTxt(m))+'</span></span>'+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+'</div>';
   if(m.area==='CAMBIO')return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:#14b8a6"></span>Cambio de moneda</span>'+cambioTag(m)+'</div>';
   if(m.area==='REVISAR')return '<span class="clspill rev"><span class="dot round" style="background:var(--gr-neg)"></span>REVISAR</span>';
-  return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+(AREA_COLOR[m.area]||'#64748b')+'"></span>'+esc(areaLabel(m.area))+'</span>'+(m.concepto?'<span class="s">'+esc(m.concepto)+(tipoConMes(m.concepto)&&m.periodoRef?' · '+esc(mesCorto(m.periodoRef)):'')+'</span>'+(esAtrasado(m)?'<span class="pill warn">atrasado</span>':''):'')+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+(m.esFijo?'<span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>Fijo · '+esc(repartoTxt(m))+'</span></span>':'')+'</div>';
+  return '<div class="clsline"><span class="clspill"><span class="dot round" style="background:'+(AREA_COLOR[m.area]||'#64748b')+'"></span>'+esc(areaLabel(m.area))+'</span>'+(m.concepto?'<span class="s">'+esc(m.area==='DEUDA GG'?nomDir(m.concepto,m.fecha):m.concepto)+(tipoConMes(m.concepto)&&m.periodoRef?' · '+esc(mesCorto(m.periodoRef)):'')+'</span>'+(esAtrasado(m)?'<span class="pill warn">atrasado</span>':''):'')+(m.personal?'<span class="s">'+esc(m.personal)+'</span>':'')+(m.esFijo?'<span class="pill brand fijotag" title="Reparto: '+esc(repartoTxt(m))+'">'+ico('buildings')+'<span>Fijo · '+esc(repartoTxt(m))+'</span></span>':'')+'</div>';
 }
 function detBase(){var s=SEARCH.trim().toLowerCase();return movsFiltro().filter(function(m){return !s||movTexto(m).indexOf(s)!==-1;});}
 function detFiltrados(base){return base.filter(function(m){
@@ -1605,7 +1623,7 @@ function panelHtml(){
       if(dvOrig)h+='<div class="alert warn" style="align-items:center">'+ico('arrow-u-up-left')+'<span>Devolución de la separación de <b>'+esc(dvOrig.cliente||dvOrig.desc||dvOrig.mov)+'</b> del '+dmy(dvOrig.fecha)+'</span><button type="button" class="btn btn-ghost btn-sm" id="pDevQuitar" style="margin-left:auto">Quitar enlace</button></div>';
       h+='<label class="pfield">Área'+(m.esFijo?' <span class="muted3" style="font-weight:500">(no se usa: es costo fijo y va según el cuadro)</span>':'')+'<select id="pArea">'+AREAS.filter(function(a){return a!=='INGRESO'||m.area==='INGRESO';}).map(function(a){return '<option value="'+a+'"'+(m.area===a?' selected':'')+'>'+esc(areaLabel(a))+'</option>';}).join('')+'</select></label>'
         +(function(){var sug=m.concepto?'':tipoSugerido(m),t=m.concepto||sug;
-          return '<div class="ci-row" id="pTipoRow"'+(tiposDe(m.area).length?'':' style="display:none"')+'><label class="pfield">Tipo de egreso'+(sug?' <span class="pill brand" style="font-size:10.5px">sugerido</span>':'')+'<select id="pTipo">'+tipoOpts(m.area,m.concepto,sug)+'</select></label>'
+          return '<div class="ci-row" id="pTipoRow"'+(tiposDe(m.area).length?'':' style="display:none"')+'><label class="pfield">Tipo de egreso'+(sug?' <span class="pill brand" style="font-size:10.5px">sugerido</span>':'')+'<select id="pTipo">'+tipoOpts(m.area,m.concepto,sug,m.fecha)+'</select></label>'
             +'<label class="pfield" id="pPerW"'+(tipoConMes(t)?'':' style="display:none"')+'>Mes al que corresponde'+(esAtrasado(m)?' <span class="pill warn" style="font-size:10.5px">atrasado</span>':'')+'<input type="month" id="pPer" value="'+esc(m.periodoRef||'')+'" placeholder="'+ym(m.fecha)+'"></label></div>';})()
         +'<label class="pfield">Personal<select id="pPers">'+personalOpts(m.personal,ym(m.fecha)).replace('>—<','>— Ninguno —<')+'</select></label>'
         +'<div class="fijobox"><label><input type="checkbox" class="chk" id="pFijo"'+(m.esFijo?' checked':'')+'>Es costo fijo</label>'
@@ -1653,7 +1671,7 @@ function wireDet(lista){
   var pa=$('pArea'),pt=$('pTipo');
   function verMes(){var w=$('pPerW');if(w)w.style.display=tipoConMes(pt.value)?'':'none';}
   if(pt){pt.onchange=verMes;if(pa)pa.addEventListener('change',function(){var m=DB.movs[SEL]||{},v=pt.value,ls=tiposDe(pa.value);
-    pt.innerHTML=tipoOpts(pa.value,ls.indexOf(v)!==-1?v:'',tipoSugerido(Object.assign({},m,{area:pa.value})));$('pTipoRow').style.display=ls.length?'':'none';verMes();});}
+    pt.innerHTML=tipoOpts(pa.value,ls.indexOf(v)!==-1?v:'',tipoSugerido(Object.assign({},m,{area:pa.value})),m.fecha);$('pTipoRow').style.display=ls.length?'':'none';verMes();});}
 }
 function leerPanel(m){
   if(esIngreso(m)){m.clas=$('pClas').value;m.asesor=$('pAses').value;if($('pLoteQ')&&leerIngresoCampos(m,'p')===false)return false;}
@@ -1858,7 +1876,7 @@ function ventasIndicadoresHtml(m2L,ymSel){
 // ============ COBRANZA ============
 function renderCobranza(){
   var todos=movsFiltro().filter(esIngreso),box=$('cobranzaBody');
-  var movs=todos.filter(function(m){return m.clas==='COBRANZA';}),fin=todos.filter(function(m){return m.clas==='FINANCIAMIENTO'||m.clas==='PRESTAMO_DIR';});
+  var movs=todos.filter(function(m){return m.clas==='COBRANZA';}),fin=todos.filter(function(m){return m.clas==='FINANCIAMIENTO'||esClasPrestamo(m.clas);});
   var t=totales(movs),tf=totales(fin),dis=READONLY?' disabled':'';
   var kpis='<div class="kpis4">'
     +kpiCard('Cobrado en el período',S(t.ingS),(t.ingU?usdTag()+' '+U(t.ingU)+' aparte · ':'')+periodoTxt(),{cls:'span2',vcls:'xl pos',ico:'<span class="ico pos">'+ico('hand-coins')+'</span>'})
@@ -2274,7 +2292,7 @@ function resumenCambio(ms){
     if(tramoCambio(m)){if(m.cargo>0){if(m.moneda==='PEN')r.salePEN+=m.cargo;else r.saleUSD+=m.cargo;}else{if(m.moneda==='USD')r.entraUSD+=m.abono;else r.entraPEN+=m.abono;}}
     else if(m.cargo>0){r.pagado+=m.cargo;r.pagos.push(m);}});
   // Dólares directos: entran dólares desde otra cuenta (Bayas, Evolution…) sin comprarlos (no salen soles) y con ellos se paga
-  var entUSD=ms.filter(function(m){return m.abono>0&&m.moneda==='USD'&&(tramoCambio(m)||m.clas==='FINANCIAMIENTO'||m.clas==='PRESTAMO_DIR'||!m.clas);});
+  var entUSD=ms.filter(function(m){return m.abono>0&&m.moneda==='USD'&&(tramoCambio(m)||m.clas==='FINANCIAMIENTO'||esClasPrestamo(m.clas)||!m.clas);});
   if(!r.salePEN&&!r.saleUSD&&!r.entraPEN&&entUSD.length&&!entUSD.some(function(m){return /MUVEX|CASA DE CAMBIO/i.test(m.desc||'');})){
     r.entraUSD=entUSD.reduce(function(a,m){return a+m.abono;},0);r.compra=true;r.directo=true;r.tc=null;r.libre=r.entraUSD-r.pagado;
     r.estado=r.libre>1?'directo_por_usar':'directo';return r;}
@@ -2317,7 +2335,7 @@ function abrirEnlaceCambio(sig){
   var g=m.cambioGrupo||nuevoGrupoCambio(m),sel={};movsGrupo(m.cambioGrupo).forEach(function(x){sel[sigOf(x)]=1;});sel[sig]=1;
   if(!m.cambioGrupo){var p=pareceCambio(m)?parejaSugerida(m):null;if(p){sel[sigOf(p)]=1;var en=m.abono>0?m:p.abono>0?p:null;if(en&&en.moneda==='USD')pagosSugeridos(en).forEach(function(x){sel[sigOf(x)]=1;});}}
   var area=m.cambioArea||(/\bMKT\b|MARKETING/i.test(m.obs||'')?'MKT':'');
-  var cands=allMovs().filter(function(x){return sigOf(x)!==sig&&cDias(x.fecha,m.fecha)<=10&&(!x.cambioGrupo||x.cambioGrupo===m.cambioGrupo)&&(pareceCambio(x)||(x.cargo>0&&x.moneda==='USD'&&x.area!=='BANCO')||(x.abono>0&&(x.clas==='FINANCIAMIENTO'||x.clas==='PRESTAMO_DIR')&&cDias(x.fecha,m.fecha)<=3)||sel[sigOf(x)]);})
+  var cands=allMovs().filter(function(x){return sigOf(x)!==sig&&cDias(x.fecha,m.fecha)<=10&&(!x.cambioGrupo||x.cambioGrupo===m.cambioGrupo)&&(pareceCambio(x)||(x.cargo>0&&x.moneda==='USD'&&x.area!=='BANCO')||(x.abono>0&&(x.clas==='FINANCIAMIENTO'||esClasPrestamo(x.clas))&&cDias(x.fecha,m.fecha)<=3)||sel[sigOf(x)]);})
     .sort(function(a,b){return (sel[sigOf(b)]?1:0)-(sel[sigOf(a)]?1:0)||(a.fecha<b.fecha?-1:1);});
   var old=$('concModal');if(old)old.remove();
   var w=document.createElement('div');w.id='concModal';w.className='modal-bg';
@@ -2361,7 +2379,7 @@ function solesDe(m){return m.moneda==='USD'?m.abono*getTC(ym(m.fecha)):m.abono;}
 function periodoConc(){var y=CV.ym;return y.length===4?function(f){return f.slice(0,4)===y;}:function(f){return f.slice(0,7)===y;};}
 function ingresosConc(){return allMovs().filter(function(m){return m.abono>0;});}
 // Ingreso de un cliente: no es préstamo ni la entrada de un cambio de moneda
-function esClienteIng(m){return m.abono>0&&m.clas!=='FINANCIAMIENTO'&&m.clas!=='PRESTAMO_DIR'&&!esMovCambio(m);}
+function esClienteIng(m){return m.abono>0&&m.clas!=='FINANCIAMIENTO'&&!esClasPrestamo(m.clas)&&!esMovCambio(m);}
 function concMesesDisp(){var o={};allMovs().forEach(function(m){o[ym(m.fecha)]=1;});return Object.keys(o).sort();}
 async function registrarCambio(tabla,clave,accion,antes,despues){
   var r=await sb.from('conciliacion_log').insert({usuario:USUARIO?USUARIO.email:'',tabla:tabla,clave:clave,accion:accion,antes:antes,despues:despues});
@@ -2699,9 +2717,10 @@ function areasConTC(movs,cm){
 }
 // Estado de resultados del periodo (base caja): ventas y cobranza según la clasificación del banco, S/ con dólares al TC del mes
 function estadoResultadosHtml(movs){
-  var t={ventas:0,cob:0,otrosIng:0,otros:0,fin:0,devGG:0,interno:0},cm=cambiosMoneda(periodoConc());
+  var t={ventas:0,cob:0,otrosIng:0,otros:0,fin:0,devGG:0,interno:0,pIn:{cap:0,dir:0},pOut:{cap:0,dir:0}},cm=cambiosMoneda(periodoConc()),Y=anioDe(CV.ym);
+  movs.forEach(function(m){if(esDevPrestamo(m))t.pOut[tipoPrestamo(m)]+=m.moneda==='USD'?m.cargo*(cm.tc||tcDe(m)):m.cargo;});
   movs.forEach(function(m){if(!(m.abono>0)||cm.set[m.sig])return;var s=solesDe(m);
-    if(m.clas==='FINANCIAMIENTO'||m.clas==='PRESTAMO_DIR'||cm.dir[m.sig]){if(esDevolucionGG(m,cm.dir))t.devGG+=s;else t.fin+=s;return;}
+    if(m.clas==='FINANCIAMIENTO'||esClasPrestamo(m.clas)||cm.dir[m.sig]){if(esDevolucionGG(m,cm.dir)){t.devGG+=s;t.pIn[m.clas==='PRESTAMO_CAP'?'cap':'dir']+=s;}else t.fin+=s;return;}
     if(m.clas==='VENTAS')t.ventas+=s;else if(m.clas==='COBRANZA')t.cob+=s;else if(m.clas==='OTROS')t.otrosIng+=s;else t.otros+=s;});
   var LV=lotesVentas(movs),nl=LV.ls.length;
   var A=areasConTC(movs,cm),ope=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'],otros=['BANCO','DVO','OTROS'];
@@ -2723,9 +2742,9 @@ function estadoResultadosHtml(movs){
     +'<div class="cobref"><div class="cobref-h"><b>Cobranza del periodo</b><span>Referencia · no suma al resultado</span><b class="num">'+S(t.cob)+'</b></div>'
     +'<div class="cobref-r tot"><span>Total que entró de clientes al banco<em>ventas + cobranza'+(t.otrosIng?' + otros':'')+(t.otros?' + sin clasificar':'')+'</em></span><b>'+S(ingCli)+'</b></div></div>'
     +'<div class="cobref"><div class="cobref-h"><b>Aparte</b><span>No suma al resultado de la empresa</span></div>'
-    +'<div class="cobref-r"><span>Cuenta Dirección · Capitalización (50%)<em>'+((t.ventas+t.cob)?(cap/(t.ventas+t.cob)*100).toFixed(1):'0')+'% de ventas + cobranza · meta '+RECOM['DEUDA GG']+'%</em></span><b>'+S(cap)+'</b></div>'
-    +(A['PREST DIR'].eq?'<div class="cobref-r"><span>Cuenta Dirección · Devolución de préstamos<em>Pachamama le devolvió a Dirección lo que esta le prestó · no es capitalización</em></span><b>'+S(A['PREST DIR'].eq)+'</b></div>':'')
-    +(t.devGG?'<div class="cobref-r"><span>Cuenta Dirección · Préstamo de Dirección<em>Dirección le prestó a Pachamama (Bayas y Frutos / Grupo Inmobiliario)</em></span><b>'+S(t.devGG)+'</b></div>':'')
+    +'<div class="cobref-r"><span>Cuenta Dirección · Capitalización '+Y+'<em>'+((t.ventas+t.cob)?(cap/(t.ventas+t.cob)*100).toFixed(1):'0')+'% de ventas + cobranza · meta '+RECOM['DEUDA GG']+'%</em></span><b>'+S(cap)+'</b></div>'
+    +[['cap','Préstamos capitalización '+Y],['dir','Préstamo directo '+Y]].map(function(x){var e=t.pIn[x[0]],s=t.pOut[x[0]];if(!e&&!s)return '';
+      return '<div class="cobref-r"><span>Cuenta Dirección · '+x[1]+'<em>entró '+S(e)+' · se devolvió '+S(s)+' · no es capitalización</em></span><b>'+(e-s<0?'('+S(s-e)+')':S(e-s))+'</b></div>';}).join('')
     +(evo?'<div class="cobref-r"><span>Evolution<em>entidad aparte · su parte de los costos fijos</em></span><b>'+S(evo)+'</b></div>':'')
     +'<div class="cobref-r"><span>Financiamiento recibido<em>préstamos</em></span><b>'+S(t.fin)+'</b></div>'
     +((cm.n||cm.sinPar.length)?'<div class="cobref-r"><span>Cambio de moneda<em>'+(cm.usd?'compra de '+U(cm.usd)+' a TC '+cm.tc.toFixed(3)+' · ':'')+cm.n+' cambio'+(cm.n!==1?'s':'')+(cm.sinPar.length?' · '+cm.sinPar.length+' sin pareja':'')+' · no es gasto</em></span><b>'+S(cm.soles+cm.sinPar.reduce(function(a,m){return a+(m.moneda==='PEN'&&m.cargo>0?m.cargo:0);},0))+'</b></div>':'')
@@ -2734,13 +2753,13 @@ function estadoResultadosHtml(movs){
     +'<p class="nota">Ventas y cobranza salen de cómo está clasificado cada ingreso en el banco. El precio por m² es lo que entró en el periodo entre los m² del lote. La Cuenta Dirección y Evolution van aparte. Los costos fijos ya van repartidos por área.</p></div>';
 }
 // Préstamo de Dirección: plata que entra de Bayas y Frutos / Grupo Inmobiliario clasificada como financiamiento (Cuenta Dirección). Va aparte: no es venta ni se resta de la capitalización
-function esDevolucionGG(m,dir){return m.abono>0&&(m.clas==='PRESTAMO_DIR'||((m.clas==='FINANCIAMIENTO'||!!(dir&&dir[m.sig]))&&(m.area==='DEUDA GG'||/BAYAS Y FRUTOS|GRUPO INMOBILIARIO ROBLES|INMUEBLES ROBLES/.test(cNorm(m.desc)))));}
+function esDevolucionGG(m,dir){return m.abono>0&&(esClasPrestamo(m.clas)||((m.clas==='FINANCIAMIENTO'||!!(dir&&dir[m.sig]))&&(m.area==='DEUDA GG'||/BAYAS Y FRUTOS|GRUPO INMOBILIARIO ROBLES|INMUEBLES ROBLES/.test(cNorm(m.desc)))));}
 // Flujo del periodo para la distribución: base = ventas + cobranza; capitalización neta; cierre con la caja del banco
 function flujoDist(movs){
-  var cm=cambiosMoneda(periodoConc()),f={V:0,C:0,otI:0,devGG:0,fin:0,egTot:0,cm:cm};
+  var cm=cambiosMoneda(periodoConc()),f={V:0,C:0,otI:0,devGG:0,fin:0,egTot:0,cm:cm,pIn:{cap:0,dir:0},pOut:{cap:0,dir:0}};
   movs.forEach(function(m){if(cm.set[m.sig])return;
-    if(m.abono>0){var s=solesDe(m);if(m.clas==='VENTAS')f.V+=s;else if(m.clas==='COBRANZA')f.C+=s;else if(esDevolucionGG(m,cm.dir))f.devGG+=s;else if(m.clas==='FINANCIAMIENTO'||cm.dir[m.sig])f.fin+=s;else f.otI+=s;}
-    if(m.cargo>0)f.egTot+=m.moneda==='USD'?m.cargo*(cm.tc||tcDe(m)):m.cargo;});
+    if(m.abono>0){var s=solesDe(m);if(m.clas==='VENTAS')f.V+=s;else if(m.clas==='COBRANZA')f.C+=s;else if(esDevolucionGG(m,cm.dir)){f.devGG+=s;f.pIn[m.clas==='PRESTAMO_CAP'?'cap':'dir']+=s;}else if(m.clas==='FINANCIAMIENTO'||cm.dir[m.sig])f.fin+=s;else f.otI+=s;}
+    if(m.cargo>0){var vv=m.moneda==='USD'?m.cargo*(cm.tc||tcDe(m)):m.cargo;f.egTot+=vv;if(esDevPrestamo(m))f.pOut[tipoPrestamo(m)]+=vv;}});
   var A=areasConTC(movs,cm);f.A=A;f.base=f.V+f.C;f.capB=A['DEUDA GG'].eq;f.capN=f.capB;f.devP=A['PREST DIR'].eq;
   f.areas=['OPE Planta','OPE Infra','OPE Comex','VENTAS','MKT','ADM'];f.gA=f.areas.reduce(function(a,k){return a+A[k].eq;},0);
   f.ot=f.egTot-f.capB-f.devP-f.gA;f.res=f.base-f.capN-f.gA-f.ot;f.caja=f.res+f.devGG-f.devP+f.fin+f.otI;
@@ -2763,12 +2782,11 @@ function distribucionHtml(movs){
   var h='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución del ingreso</h2><div class="card-sub">Base: lo que entró de clientes (ventas + cobranza) · cierra con la caja del banco</div></div></div>'
     +'<div class="tablewrap"><table class="table er dist"><thead><tr><th></th><th class="num">S/</th><th class="num">%</th><th class="num">Recom.</th><th></th></tr></thead><tbody>'
     +fila('Entró de clientes',b,null,'sum','ventas '+S(f.V)+' · cobranza '+S(f.C))
-    +fila('Cuenta Dirección · Capitalización',f.capN,RECOM['DEUDA GG'],'','','-')
+    +fila('Cuenta Dirección · Capitalización '+anioDe(CV.ym),f.capN,RECOM['DEUDA GG'],'','','-')
     +fila('Áreas',f.gA,recA,'','<span>'+f.areas.filter(function(k){return f.A[k].eq;}).map(function(k){var p=b?f.A[k].eq/b*100:0,ex=p>RECOM[k]+0.05;return esc(areaLabel(k))+' '+p.toFixed(1)+'%'+(ex?' <b class="neg">▲'+RECOM[k]+'%</b>':'');}).join(' · ')+'</span>','-')
     +(Math.abs(f.ot)>0.5?fila('Banco, Evolution y otros',f.ot,null,'','','-'):'')
     +fila('Resultado con clientes',f.res,null,'sum','','')
-    +(f.devGG?fila('+ Préstamo de Dirección',f.devGG,null,'','Cuenta Dirección · Dirección le prestó a Pachamama','+'):'')
-    +(f.devP?fila('− Devolución de préstamos a Dirección',f.devP,null,'','Cuenta Dirección · Pachamama le devolvió a Dirección','-'):'')
+    +[['cap','Préstamos capitalización '+anioDe(CV.ym)],['dir','Préstamo directo '+anioDe(CV.ym)]].map(function(x){return (f.pIn[x[0]]?fila('+ '+x[1]+' · entró',f.pIn[x[0]],null,'','Cuenta Dirección · Dirección le prestó a Pachamama','+'):'')+(f.pOut[x[0]]?fila('− '+x[1]+' · devolución',f.pOut[x[0]],null,'','Cuenta Dirección · Pachamama le devolvió a Dirección','-'):'');}).join('')
     +(f.fin?fila('+ Financiamiento recibido',f.fin,null,'','préstamos y socios','+'):'')
     +(f.otI?fila('+ Otros ingresos',f.otI,null,'','reembolsos, intereses o sin clasificar','+'):'')
     +(Math.abs(f.dtc)>0.5?'<tr><td>'+(f.dtc<0?'− ':'+ ')+'Cambio de moneda<div class="sub">compra/venta de dólares y tipo de cambio</div></td><td class="num">'+(f.dtc<0?'('+S(-f.dtc)+')':S(f.dtc))+'</td><td></td><td></td><td></td></tr>':'')
@@ -2848,6 +2866,10 @@ var FILTRO_SALUD={
   sinpers:['Ventas sin persona',function(m){return m.cargo>0&&m.area==='VENTAS'&&!m.personal&&!m.asesor;}],
   dup:['Posibles duplicados',esDupMov],
   cambio:['Cambio sin enlazar',function(m){return esMovCambio(m)&&!m.cambioGrupo;}]};
+// Filtros de la tarjeta Cuenta Dirección (Movimientos)
+FILTRO_SALUD.dircap=['Capitalización',function(m){return m.cargo>0&&m.area==='DEUDA GG'&&!esDevPrestamo(m);}];
+FILTRO_SALUD.dirpcap=['Préstamos capitalización',function(m){return tipoPrestamo(m)==='cap';}];
+FILTRO_SALUD.dirpdir=['Préstamo directo',function(m){return tipoPrestamo(m)==='dir';}];
 var SALUD=null,SALUD_TRY=false;
 var BOTS=null;
 async function cargarSalud(){try{var rr=await Promise.all([sb.rpc('salud_sistema'),sb.rpc('bots_estado')]),r=rr[0];if(r&&r.data&&r.data.checks)SALUD=r.data;if(rr[1]&&Array.isArray(rr[1].data))BOTS=rr[1].data;}catch(e){}
