@@ -759,10 +759,10 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
   </div>
 
   <nav class="bnav" id="bNav">
+    <button data-v="consol"><i class="ph ph-chart-bar"></i>Resultados</button>
     <button data-v="mes"><i class="ph ph-arrows-down-up"></i>Movs</button>
     <button data-v="ventas"><i class="ph ph-chart-line-up"></i>Ventas</button>
     <button data-v="fijos"><i class="ph ph-buildings"></i>Fijos</button>
-    <button data-v="consol"><i class="ph ph-chart-bar"></i>Anual</button>
     <button data-v="mas"><i class="ph ph-dots-three-circle"></i>Más</button>
   </nav>
   <div class="sheet-bg" id="masBg"></div>
@@ -1294,10 +1294,10 @@ var VIEWS={
   conc:{t:'Conciliación',s:'Con el banco · cuadre, resultado y ventas nuevas del mes',ic:'scales',lbl:'Conciliación',f:false},
   lotes:{t:'Lotes',s:'Estado, m², cliente y lo que entró al banco por cada lote',ic:'map-trifold',lbl:'Lotes',f:false},
   fijos:{t:'Costos fijos',s:'Cuánto cuesta la oficina y a quién le toca',ic:'buildings',lbl:'Costos fijos',f:true},
-  consol:{t:'Consolidado',s:'Visión anual · dólares convertidos a S/ con el TC del mes',ic:'chart-bar',lbl:'Consolidado',f:false},
+  consol:{t:'Consolidado',s:'Resultados finales · año, rango de fechas o meses elegidos',ic:'chart-bar',lbl:'Consolidado',f:false},
   salud:{t:'Salud del sistema',s:'Revisión automática de los datos y respaldos · el saldo del banco manda',ic:'heartbeat',lbl:'Salud',f:false}
 };
-var ORDEN=['cargar','mes','ventas','cobranza','conc','lotes','cac','fijos','consol','salud'];
+var ORDEN=['consol','cargar','mes','ventas','cobranza','conc','lotes','cac','fijos','salud'];
 function buildNav(){
   $('sbNav').innerHTML=ORDEN.filter(function(v){return !(READONLY&&v==='cargar');}).map(function(v){return '<button data-v="'+v+'">'+ico(VIEWS[v].ic)+VIEWS[v].lbl+(v==='salud'?'<span class="navbadge" id="saludBadge" hidden></span>':'')+'</button>';}).join('');
   Array.prototype.forEach.call(document.querySelectorAll('#sbNav button,#bNav button,#masSheet .grid3 button'),function(b){b.onclick=function(){irA(b.dataset.v);};});
@@ -3413,7 +3413,7 @@ async function iniciar(){
   sb.rpc('drive_link').then(function(r){var u=r&&r.data;if(u){['driveLink','driveLinkM'].forEach(function(id){var a=$(id);a.href=u;a.hidden=false;});}});
   try{await cargarNube();}catch(e){setSync('error al cargar');}
   buildFilters();
-  irA('mes');
+  irA('consol'); // lo primero que se ve al entrar: resultados finales
 }
 async function entrar(){
   var email=$('lemail').value.trim(),pass=$('lpass').value;
