@@ -817,7 +817,9 @@ function clasDir(c,fecha){var a=anioDe(fecha);return c==='PRESTAMO_CAP'?'Présta
 // El dinero NO se mueve de mes (el banco manda); esto solo sirve para medir el % de capitalización de cada mes.
 function esCapit(m){return m.cargo>0&&m.area==='DEUDA GG'&&!esDevPrestamo(m);}
 function mesDeNota(m){var r=/\((\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\)/.exec(m.obs||'');if(!r)return '';var mm=+r[2];if(!(mm>=1&&mm<=12))return '';
-  var y=+m.fecha.slice(0,4);if(r[3]){y=+r[3];if(y<100)y+=2000;}else if(mm>+m.fecha.slice(5,7))y--;return y+'-'+('0'+mm).slice(-2);}
+  var y=+m.fecha.slice(0,4);if(r[3]){y=+r[3];if(y<100)y+=2000;}
+  else{var pago=new Date(m.fecha+'T12:00:00'),d=Math.min(Math.max(+r[1],1),28),best=null;[y-1,y,y+1].forEach(function(y0){var dif=Math.abs(new Date(y0,mm-1,d,12)-pago);if(best===null||dif<best[0])best=[dif,y0];});y=best[1];}
+  return y+'-'+('0'+mm).slice(-2);}
 function capMeses(m){var p=m.periodoRef||'',out;
   if(p.indexOf('=')>=0){out=p.split('|').map(function(x){var a=x.split('=');return {ym:a[0],monto:Math.round((+a[1]||0)*100)/100};}).filter(function(x){return /^\d{4}-\d{2}$/.test(x.ym)&&x.monto>0;});
     var s=out.reduce(function(a,x){return a+x.monto;},0),rest=Math.round((m.cargo-s)*100)/100;if(rest>0.004)out.push({ym:ym(m.fecha),monto:rest});if(out.length)return out;}
@@ -1511,15 +1513,19 @@ function dirTotales(movs,f){var cm=cambiosMoneda(enPDe(f));DIR_CM={set:cm.set||{
   movs.forEach(function(m){if(m.cargo>0&&m.area==='DEUDA GG'){if(esDevPrestamo(m))ad(tipoPrestamo(m)==='cap'?'pcapOut':'pdirOut',m,m.cargo);else ad('cap',m,m.cargo);}
     else if(m.abono>0){var tp=tipoPrestamo(m);if(tp)ad(tp==='cap'?'pcapIn':'pdirIn',m,m.abono);}});
   return R;}
+// Filas de la distribución con Cuenta Dirección medida por mes que corresponde (el resto de áreas igual)
+function distCorr(dn,movs,f){var mz={};movs.forEach(function(m){mz[ym(m.fecha)]=1;});var C=capCorresponde(Object.keys(mz),enPDe(f));
+  return dn.rows.map(function(r){if(r.area!=='DEUDA GG'||!dn.base)return r;var x=Object.assign({},r);x.pct=C.pct;x.status=(r.gastado||r.gastadoU||C.cap.eq)?(C.pct>r.recom+0.05?'ex':'ok'):'na';x.corr=true;return x;});}
 function resultadosHtml(movs,f,dn,tcTxt){
   // Distribución por área (núcleo)
-  var maxP=Math.max.apply(null,dn.rows.map(function(r){return Math.max(r.pct,r.recom);}))*1.08||1;
-  var dRows=dn.rows.map(function(r){
+  var dnR=distCorr(dn,movs,f);
+  var maxP=Math.max.apply(null,dnR.map(function(r){return Math.max(r.pct,r.recom);}))*1.08||1;
+  var dRows=dnR.map(function(r){
     return '<tr><td><div class="areacell">'+areaDot(r.area)+esc(areaLabel(r.area))+'</div></td><td class="num">'+S(r.gastado)+'</td><td class="num usd">'+(r.gastadoU?U(r.gastadoU):'—')+'</td>'
       +'<td class="num"><div class="stack">'+(r.fijo||r.fijoU?(r.fijo?'<span>'+S(r.fijo)+'</span>':'')+(r.fijoU?'<span class="usd">'+U(r.fijoU)+'</span>':''):'<span class="muted3">—</span>')+'</div></td>'
-      +'<td><div class="pctcell">'+pctBar(r,maxP)+'<span class="v">'+r.pct.toFixed(1)+'%</span><span class="r">/ '+r.recom.toFixed(1)+'%</span></div></td><td>'+pillStatus(r.status)+'</td></tr>';}).join('');
+      +'<td><div class="pctcell">'+pctBar(r,maxP)+'<span class="v">'+r.pct.toFixed(1)+'%</span><span class="r">/ '+r.recom.toFixed(1)+'%</span></div>'+(r.corr?'<div class="muted3" style="font-size:11px">por mes que corresponde</div>':'')+'</td><td>'+pillStatus(r.status)+'</td></tr>';}).join('');
   var dTot='<tr class="total"><td>TOTAL NÚCLEO</td><td class="num">'+S(dn.tot)+'</td><td class="num usd">'+(dn.totU?U(dn.totU):'—')+'</td><td class="num"><div class="stack">'+(dn.totFijo?'<span>'+S(dn.totFijo)+'</span>':'')+(dn.totFijoU?'<span class="usd">'+U(dn.totFijoU)+'</span>':'')+(dn.totFijo||dn.totFijoU?'':'—')+'</div></td><td>'+(dn.base?dn.pctTot.toFixed(1)+'%':'—')+' <span class="muted3">/ 100%</span></td><td></td></tr>';
-  var dMob=dn.rows.map(function(r){return '<div class="barrow"><div class="top"><span class="n">'+areaDot(r.area)+esc(areaLabel(r.area))+'</span>'+pillStatus(r.status)+'</div>'+pctBar(r,maxP)
+  var dMob=dnR.map(function(r){return '<div class="barrow"><div class="top"><span class="n">'+areaDot(r.area)+esc(areaLabel(r.area))+'</span>'+pillStatus(r.status)+'</div>'+pctBar(r,maxP)
     +'<div class="muted" style="font-size:12px"><b style="color:var(--gr-text)">'+r.pct.toFixed(1)+'%</b> de '+r.recom.toFixed(1)+'% · '+S(r.gastado)+(r.gastadoU?' · <span class="usd">'+U(r.gastadoU)+'</span>':'')+'</div></div>';}).join('');
   var distCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución por área</h2><div class="card-sub">% sobre lo que entró de clientes (ventas + cobranza): '+(dn.base?S(dn.base):'sin ventas ni cobranza clasificadas')+' · Cuenta Dirección meta 50% y áreas 50% · los costos fijos se reparten según el cuadro de colaboradores · la marca negra es el % recomendado</div></div></div>'
     +'<div class="tablewrap only-d"><table class="table"><thead><tr><th>Área</th><th class="num">Gastado S/</th><th class="num">Gastado $</th><th class="num">De costos fijos</th><th>% de lo que entró vs recomendado</th><th>Status</th></tr></thead><tbody>'+dRows+dTot+'</tbody></table></div>'
@@ -1557,7 +1563,7 @@ function renderMes(){
   if(!movs.length){box.innerHTML='<div class="card">'+emptyHtml('tray','No hay movimientos en este rango',READONLY?'Elige otro mes arriba.':'Sube un estado de cuenta en "Cargar".','dash')+'</div>';return;}
   var sal=DB.saldos[f.ym]||{},tc=getTC(f.ym),t=totales(movs);
   var pend=movs.filter(function(m){return m.area==='REVISAR';}).length;
-  var dn=distIngreso(movs,f),exc=dn.rows.filter(function(r){return r.status==='ex';});
+  var dn=distIngreso(movs,f),exc=distCorr(dn,movs,f).filter(function(r){return r.status==='ex';});
   var ult=movs.reduce(function(a,m){return m.fecha>a?m.fecha:a;},'');
   var per=f.rango?'del período':'del mes';
   var tieneSaldo=sal.soles!=null||sal.dolares!=null;
