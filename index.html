@@ -254,6 +254,7 @@ select.input-ghost{appearance:auto}
 .inlinebars .v{white-space:nowrap;font-size:12.5px;text-align:right;min-width:190px}
 
 /* ---------- Chips y búsqueda ---------- */
+.mesbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 16px}.mchips{display:flex;gap:6px;flex-wrap:wrap}.mchip{height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--gr-border);background:var(--gr-surface);font-size:12.5px;font-weight:700;color:var(--gr-text-2);cursor:pointer}.mchip.on{background:var(--gr-brand);border-color:var(--gr-brand);color:#fff}.mchip:disabled{opacity:.35;cursor:default}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
 .chip{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 14px;border-radius:999px;border:1px solid var(--gr-border);background:var(--gr-surface);font-size:13px;font-weight:600;color:var(--gr-text)}
 .chip .c{min-width:22px;height:22px;padding:0 6px;border-radius:999px;background:var(--gr-surface-2);display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:var(--gr-text-2)}
@@ -737,17 +738,19 @@ details.more summary{min-width:0}details.more summary>*{min-width:0}details.more
       <section class="view" id="v-consol">
         <div class="filterbar">
           <div class="seg" id="consolSeg">
-            <button class="on" data-cv="general">General (ingresos vs egresos)</button>
+            <button class="on" data-cv="result">Resultados (como Movimientos)</button>
+            <button data-cv="general">General (ingresos vs egresos)</button>
             <button data-cv="ingresos">Ventas + Cobranza</button>
             <button data-cv="cac">CAC y Rentabilidad</button>
           </div>
           <div class="grow"></div>
           <label>Año<select id="selAnio" style="min-width:100px"></select></label>
-          <label class="only-d">Desde<input type="date" id="cDesde"></label>
-          <label class="only-d">Hasta<input type="date" id="cHasta"></label>
-          <button class="btn btn-ghost only-d" id="cReset">Limpiar fechas</button>
+          <label>Desde<input type="date" id="cDesde"></label>
+          <label>Hasta<input type="date" id="cHasta"></label>
+          <button class="btn btn-ghost" id="cReset">Limpiar fechas</button>
           <button class="btn btn-secondary" id="expTodo"><i class="ph ph-microsoft-excel-logo xls"></i>Exportar a Excel</button>
         </div>
+        <div class="mesbar"><span class="muted">Meses:</span><div class="mchips" id="cMeses"></div></div>
         <div id="consolBody" style="display:flex;flex-direction:column;gap:20px"></div>
       </section>
 
@@ -1149,7 +1152,7 @@ function sumarAreas(movs,areas){
 // Distribución de Movimientos contra LO QUE ENTRÓ de clientes (ventas + cobranza), igual que Conciliación:
 // Cuenta Dirección (capitalización) meta 50% y las áreas el otro 50%. Mismo TC que Conciliación (TC pagado en los cambios del período).
 function distIngreso(movs,f){
-  var enP=f.rango?function(x){return (!f.d||x>=f.d)&&(!f.h||x<=f.h);}:function(x){return x.slice(0,7)===f.ym;};
+  var enP=f.enP||(f.rango?function(x){return (!f.d||x>=f.d)&&(!f.h||x<=f.h);}:function(x){return x.slice(0,7)===f.ym;});
   var cm=cambiosMoneda(enP),base=0;
   movs.forEach(function(m){if(m.abono>0&&!cm.set[m.sig]&&(m.clas==='VENTAS'||m.clas==='COBRANZA'))base+=solesDe(m);});
   var x=sumarAreas(movs.filter(function(m){return !cm.set[m.sig];}),NUCLEO),T=x.tot;
@@ -1474,6 +1477,52 @@ function pctBar(r,maxP){
   var col=r.status==='ex'?'var(--gr-neg)':(AREA_COLOR[r.area]||'#64748b');
   return '<div class="track"><div class="fill" style="width:'+Math.min(r.pct/maxP*100,100).toFixed(1)+'%;background:'+col+'"></div><div class="mark" style="left:'+Math.min(r.recom/maxP*100,100).toFixed(1)+'%"></div></div>';
 }
+// Tarjetas de resultados de Movimientos (distribución por área, Cuenta Dirección, otros egresos). Se usan en Movimientos (un mes o rango)
+// y en Consolidado (año, rango o meses elegidos). f.enP = qué fechas entran al período (para los cambios de moneda y el TC pagado).
+function enPDe(f){return f.enP||(f.rango?function(x){return (!f.d||x>=f.d)&&(!f.h||x<=f.h);}:function(x){return x.slice(0,7)===f.ym;});}
+// Totales de Cuenta Dirección: capitalización y los dos préstamos (entró / devuelto), en soles y dólares por separado
+function dirTotales(movs,f){var cm=cambiosMoneda(enPDe(f));DIR_CM={set:cm.set||{},dir:cm.dir||{}};var R={};['cap','pcapIn','pcapOut','pdirIn','pdirOut'].forEach(function(k){R[k]={s:0,u:0,n:0};});
+  function ad(k,m,v){var r=R[k];r.n++;if(m.moneda==='USD')r.u+=v;else r.s+=v;}
+  movs.forEach(function(m){if(m.cargo>0&&m.area==='DEUDA GG'){if(esDevPrestamo(m))ad(tipoPrestamo(m)==='cap'?'pcapOut':'pdirOut',m,m.cargo);else ad('cap',m,m.cargo);}
+    else if(m.abono>0){var tp=tipoPrestamo(m);if(tp)ad(tp==='cap'?'pcapIn':'pdirIn',m,m.abono);}});
+  return R;}
+function resultadosHtml(movs,f,dn,tcTxt){
+  // Distribución por área (núcleo)
+  var maxP=Math.max.apply(null,dn.rows.map(function(r){return Math.max(r.pct,r.recom);}))*1.08||1;
+  var dRows=dn.rows.map(function(r){
+    return '<tr><td><div class="areacell">'+areaDot(r.area)+esc(areaLabel(r.area))+'</div></td><td class="num">'+S(r.gastado)+'</td><td class="num usd">'+(r.gastadoU?U(r.gastadoU):'—')+'</td>'
+      +'<td class="num"><div class="stack">'+(r.fijo||r.fijoU?(r.fijo?'<span>'+S(r.fijo)+'</span>':'')+(r.fijoU?'<span class="usd">'+U(r.fijoU)+'</span>':''):'<span class="muted3">—</span>')+'</div></td>'
+      +'<td><div class="pctcell">'+pctBar(r,maxP)+'<span class="v">'+r.pct.toFixed(1)+'%</span><span class="r">/ '+r.recom.toFixed(1)+'%</span></div></td><td>'+pillStatus(r.status)+'</td></tr>';}).join('');
+  var dTot='<tr class="total"><td>TOTAL NÚCLEO</td><td class="num">'+S(dn.tot)+'</td><td class="num usd">'+(dn.totU?U(dn.totU):'—')+'</td><td class="num"><div class="stack">'+(dn.totFijo?'<span>'+S(dn.totFijo)+'</span>':'')+(dn.totFijoU?'<span class="usd">'+U(dn.totFijoU)+'</span>':'')+(dn.totFijo||dn.totFijoU?'':'—')+'</div></td><td>'+(dn.base?dn.pctTot.toFixed(1)+'%':'—')+' <span class="muted3">/ 100%</span></td><td></td></tr>';
+  var dMob=dn.rows.map(function(r){return '<div class="barrow"><div class="top"><span class="n">'+areaDot(r.area)+esc(areaLabel(r.area))+'</span>'+pillStatus(r.status)+'</div>'+pctBar(r,maxP)
+    +'<div class="muted" style="font-size:12px"><b style="color:var(--gr-text)">'+r.pct.toFixed(1)+'%</b> de '+r.recom.toFixed(1)+'% · '+S(r.gastado)+(r.gastadoU?' · <span class="usd">'+U(r.gastadoU)+'</span>':'')+'</div></div>';}).join('');
+  var distCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución por área</h2><div class="card-sub">% sobre lo que entró de clientes (ventas + cobranza): '+(dn.base?S(dn.base):'sin ventas ni cobranza clasificadas')+' · Cuenta Dirección meta 50% y áreas 50% · los costos fijos se reparten según el cuadro de colaboradores · la marca negra es el % recomendado</div></div></div>'
+    +'<div class="tablewrap only-d"><table class="table"><thead><tr><th>Área</th><th class="num">Gastado S/</th><th class="num">Gastado $</th><th class="num">De costos fijos</th><th>% de lo que entró vs recomendado</th><th>Status</th></tr></thead><tbody>'+dRows+dTot+'</tbody></table></div>'
+    +'<div class="barlist only-m">'+dMob+'</div>'
+    +'<p class="nota">Soles y dólares se muestran por separado. Solo para el % se suman los dólares al TC del mes ('+tcTxt+').</p></div>';
+  // Cuenta Dirección del período: capitalización (meta 50%) y los dos tipos de préstamo, con su "Ver" para revisar cada movimiento
+  var dirCard=(function(){var Y=anioDe(f.ym||f.d||f.h||(movs[0]&&movs[0].fecha)),R=dirTotales(movs,f);
+    function mon(r){return (r.s||!r.u?S(r.s):'')+(r.u?(r.s?' + ':'')+'<span class="usd">'+U(r.u)+'</span>':'');}
+    function sal(a,b){var s=a.s-b.s,u=a.u-b.u,neg=s<-0.005||u<-0.005,pos=s>0.005||u>0.005;if(neg&&!pos){s=-s;u=-u;}
+      var t=(Math.abs(s)>0.005||Math.abs(u)<=0.005?S(s):'')+(Math.abs(u)>0.005?(Math.abs(s)>0.005?' + ':'')+'<span class="usd">'+U(u)+'</span>':'');
+      return t+'<div class="sub">'+(neg&&!pos?'devuelto':pos&&!neg?'por devolver':!pos&&!neg?'al día':'saldo (entró − devuelto)')+'</div>';}
+    function ver(k,n){return n?'<button type="button" class="btn btn-ghost btn-sm dirVer" data-f="'+k+'">'+ico('eye')+'Ver '+n+'</button>':'<span class="muted3">—</span>';}
+    var dg=dn.rows.filter(function(r){return r.area==='DEUDA GG';})[0]||{pct:0,recom:50},st=dg.pct>dg.recom+0.05;
+    return '<div class="card"><div class="card-head"><div><h2 class="card-title">Cuenta Dirección '+Y+'</h2><div class="card-sub">Lo que va a Dirección y los préstamos con Dirección · toca <b>Ver</b> para revisar cada movimiento</div></div></div>'
+      +'<div class="tablewrap"><table class="table cards"><thead><tr><th>Ítem</th><th class="num">Entró</th><th class="num">Salió</th><th class="num">Resultado</th><th></th></tr></thead><tbody>'
+      +'<tr><td class="full"><div class="areacell">'+areaDot('DEUDA GG')+'<b>Capitalización '+Y+'</b></div><div class="sub">Lo que va a Dirección · única que cuenta para la meta del 50%</div></td><td class="num" data-l="Entró"><span class="muted3">—</span></td><td class="num" data-l="Salió">'+mon(R.cap)+'</td>'
+        +'<td class="num" data-l="Resultado">'+(dn.base?'<span class="pill '+(st?'ex':'ok')+'">'+dg.pct.toFixed(1)+'% de lo que entró</span><div class="sub">meta '+dg.recom+'%</div>':'<span class="muted3">sin ventas ni cobranza</span>')+'</td><td data-l="">'+ver('dircap',R.cap.n)+'</td></tr>'
+      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamos capitalización '+Y+'</b></div><div class="sub">Dirección adelanta plata a cuenta de su capitalización y Pachamama se la devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pcapIn)+'</td><td class="num" data-l="Salió">'+mon(R.pcapOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pcapIn,R.pcapOut)+'</td><td data-l="">'+ver('dirpcap',R.pcapIn.n+R.pcapOut.n)+'</td></tr>'
+      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamo directo '+Y+'</b></div><div class="sub">Dirección le presta a Pachamama (planilla, recargas, etc.) y Pachamama se lo devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pdirIn)+'</td><td class="num" data-l="Salió">'+mon(R.pdirOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pdirIn,R.pdirOut)+'</td><td data-l="">'+ver('dirpdir',R.pdirIn.n+R.pdirOut.n)+'</td></tr>'
+      +'</tbody></table></div><p class="nota">Los préstamos no cuentan para el 50%. «Por devolver» = entró más de lo que se devolvió en el período; «Devuelto» = en el período se devolvió (préstamos de meses anteriores). Las compras de dólares van en Cambio de moneda, no aquí.</p></div>';})();
+  // Otros egresos
+  var ds=distSeg(movs),sT=0,sU=0,sO=0;ds.forEach(function(d){sT+=d.gastado;sU+=d.gastadoU;sO+=d.ops;});
+  var segCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Otros egresos</h2><div class="card-sub">Fuera del núcleo · no afectan el 100%</div></div></div>'
+    +'<table class="table cards"><tbody>'+ds.map(function(d){return '<tr><td class="full"><div class="areacell">'+areaDot(d.area)+esc(areaLabel(d.area))+'</div></td><td class="num" data-l="Soles">'+S(d.gastado)+'</td><td class="num usd" data-l="Dólares">'+(d.gastadoU?U(d.gastadoU):'—')+'</td><td class="num muted" data-l="Ops">'+d.ops+' ops</td></tr>';}).join('')
+    +'<tr class="total"><td>Subtotal</td><td class="num" data-l="Soles">'+S(sT)+'</td><td class="num usd" data-l="Dólares">'+(sU?U(sU):'—')+'</td><td class="num" data-l="Ops">'+sO+' ops</td></tr></tbody></table>'
+    +'</div>';
+  return distCard+dirCard+segCard;
+}
 function renderMes(){
   var f=F(),movs=movsFiltro(),box=$('mesBody');
   if(!movs.length){box.innerHTML='<div class="card">'+emptyHtml('tray','No hay movimientos en este rango',READONLY?'Elige otro mes arriba.':'Sube un estado de cuenta en "Cargar".','dash')+'</div>';return;}
@@ -1496,47 +1545,11 @@ function renderMes(){
         +(pend?'<button class="pill ex" id="goRev" style="align-self:flex-start;cursor:pointer">'+ico('warning')+pend+' en REVISAR · clasificar</button>':'<span class="pill ok" style="align-self:flex-start">'+ico('check')+'Todo clasificado</span>')+'</div>'
       +kpiCard('Áreas excedidas',exc.length+' de '+NUCLEO.length,exc.length?esc(exc.map(function(r){return areaLabel(r.area);}).join(', ')):'Todas dentro de lo recomendado',{ico:ico('gauge','font-size:15px'),cls:exc.length?'kpi-warn':'kpi-posbox'})
     +'</div></div>';
-  // Distribución por área (núcleo)
-  var maxP=Math.max.apply(null,dn.rows.map(function(r){return Math.max(r.pct,r.recom);}))*1.08||1;
-  var dRows=dn.rows.map(function(r){
-    return '<tr><td><div class="areacell">'+areaDot(r.area)+esc(areaLabel(r.area))+'</div></td><td class="num">'+S(r.gastado)+'</td><td class="num usd">'+(r.gastadoU?U(r.gastadoU):'—')+'</td>'
-      +'<td class="num"><div class="stack">'+(r.fijo||r.fijoU?(r.fijo?'<span>'+S(r.fijo)+'</span>':'')+(r.fijoU?'<span class="usd">'+U(r.fijoU)+'</span>':''):'<span class="muted3">—</span>')+'</div></td>'
-      +'<td><div class="pctcell">'+pctBar(r,maxP)+'<span class="v">'+r.pct.toFixed(1)+'%</span><span class="r">/ '+r.recom.toFixed(1)+'%</span></div></td><td>'+pillStatus(r.status)+'</td></tr>';}).join('');
-  var dTot='<tr class="total"><td>TOTAL NÚCLEO</td><td class="num">'+S(dn.tot)+'</td><td class="num usd">'+(dn.totU?U(dn.totU):'—')+'</td><td class="num"><div class="stack">'+(dn.totFijo?'<span>'+S(dn.totFijo)+'</span>':'')+(dn.totFijoU?'<span class="usd">'+U(dn.totFijoU)+'</span>':'')+(dn.totFijo||dn.totFijoU?'':'—')+'</div></td><td>'+(dn.base?dn.pctTot.toFixed(1)+'%':'—')+' <span class="muted3">/ 100%</span></td><td></td></tr>';
-  var dMob=dn.rows.map(function(r){return '<div class="barrow"><div class="top"><span class="n">'+areaDot(r.area)+esc(areaLabel(r.area))+'</span>'+pillStatus(r.status)+'</div>'+pctBar(r,maxP)
-    +'<div class="muted" style="font-size:12px"><b style="color:var(--gr-text)">'+r.pct.toFixed(1)+'%</b> de '+r.recom.toFixed(1)+'% · '+S(r.gastado)+(r.gastadoU?' · <span class="usd">'+U(r.gastadoU)+'</span>':'')+'</div></div>';}).join('');
-  var distCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Distribución por área</h2><div class="card-sub">% sobre lo que entró de clientes (ventas + cobranza): '+(dn.base?S(dn.base):'sin ventas ni cobranza clasificadas')+' · Cuenta Dirección meta 50% y áreas 50% · los costos fijos se reparten según el cuadro de colaboradores · la marca negra es el % recomendado</div></div></div>'
-    +'<div class="tablewrap only-d"><table class="table"><thead><tr><th>Área</th><th class="num">Gastado S/</th><th class="num">Gastado $</th><th class="num">De costos fijos</th><th>% de lo que entró vs recomendado</th><th>Status</th></tr></thead><tbody>'+dRows+dTot+'</tbody></table></div>'
-    +'<div class="barlist only-m">'+dMob+'</div>'
-    +'<p class="nota">Soles y dólares se muestran por separado. Solo para el % se suman los dólares al TC del mes ('+tc.toFixed(3)+').</p></div>';
-  // Cuenta Dirección del período: capitalización (meta 50%) y los dos tipos de préstamo, con su "Ver" para revisar cada movimiento
-  var dirCard=(function(){var enP=f.rango?function(x){return (!f.d||x>=f.d)&&(!f.h||x<=f.h);}:function(x){return x.slice(0,7)===f.ym;};var cm=cambiosMoneda(enP);DIR_CM={set:cm.set||{},dir:cm.dir||{}};var Y=anioDe(f.ym||f.d||f.h||(movs[0]&&movs[0].fecha)),R={};['cap','pcapIn','pcapOut','pdirIn','pdirOut'].forEach(function(k){R[k]={s:0,u:0,n:0};});
-    function ad(k,m,v){var r=R[k];r.n++;if(m.moneda==='USD')r.u+=v;else r.s+=v;}
-    movs.forEach(function(m){if(m.cargo>0&&m.area==='DEUDA GG'){if(esDevPrestamo(m))ad(tipoPrestamo(m)==='cap'?'pcapOut':'pdirOut',m,m.cargo);else ad('cap',m,m.cargo);}
-      else if(m.abono>0){var tp=tipoPrestamo(m);if(tp)ad(tp==='cap'?'pcapIn':'pdirIn',m,m.abono);}});
-    function mon(r){return (r.s||!r.u?S(r.s):'')+(r.u?(r.s?' + ':'')+'<span class="usd">'+U(r.u)+'</span>':'');}
-    function sal(a,b){var s=a.s-b.s,u=a.u-b.u,neg=s<-0.005||u<-0.005,pos=s>0.005||u>0.005;if(neg&&!pos){s=-s;u=-u;}
-      var t=(Math.abs(s)>0.005||Math.abs(u)<=0.005?S(s):'')+(Math.abs(u)>0.005?(Math.abs(s)>0.005?' + ':'')+'<span class="usd">'+U(u)+'</span>':'');
-      return t+'<div class="sub">'+(neg&&!pos?'devuelto':pos&&!neg?'por devolver':!pos&&!neg?'al día':'saldo (entró − devuelto)')+'</div>';}
-    function ver(k,n){return n?'<button type="button" class="btn btn-ghost btn-sm dirVer" data-f="'+k+'">'+ico('eye')+'Ver '+n+'</button>':'<span class="muted3">—</span>';}
-    var dg=dn.rows.filter(function(r){return r.area==='DEUDA GG';})[0]||{pct:0,recom:50},st=dg.pct>dg.recom+0.05;
-    return '<div class="card"><div class="card-head"><div><h2 class="card-title">Cuenta Dirección '+Y+'</h2><div class="card-sub">Lo que va a Dirección y los préstamos con Dirección · toca <b>Ver</b> para revisar cada movimiento</div></div></div>'
-      +'<div class="tablewrap"><table class="table cards"><thead><tr><th>Ítem</th><th class="num">Entró</th><th class="num">Salió</th><th class="num">Resultado</th><th></th></tr></thead><tbody>'
-      +'<tr><td class="full"><div class="areacell">'+areaDot('DEUDA GG')+'<b>Capitalización '+Y+'</b></div><div class="sub">Lo que va a Dirección · única que cuenta para la meta del 50%</div></td><td class="num" data-l="Entró"><span class="muted3">—</span></td><td class="num" data-l="Salió">'+mon(R.cap)+'</td>'
-        +'<td class="num" data-l="Resultado">'+(dn.base?'<span class="pill '+(st?'ex':'ok')+'">'+dg.pct.toFixed(1)+'% de lo que entró</span><div class="sub">meta '+dg.recom+'%</div>':'<span class="muted3">sin ventas ni cobranza</span>')+'</td><td data-l="">'+ver('dircap',R.cap.n)+'</td></tr>'
-      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamos capitalización '+Y+'</b></div><div class="sub">Dirección adelanta plata a cuenta de su capitalización y Pachamama se la devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pcapIn)+'</td><td class="num" data-l="Salió">'+mon(R.pcapOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pcapIn,R.pcapOut)+'</td><td data-l="">'+ver('dirpcap',R.pcapIn.n+R.pcapOut.n)+'</td></tr>'
-      +'<tr><td class="full"><div class="areacell">'+areaDot('PREST DIR')+'<b>Préstamo directo '+Y+'</b></div><div class="sub">Dirección le presta a Pachamama (planilla, recargas, etc.) y Pachamama se lo devuelve</div></td><td class="num pos" data-l="Entró">'+mon(R.pdirIn)+'</td><td class="num" data-l="Salió">'+mon(R.pdirOut)+'</td><td class="num" data-l="Pendiente">'+sal(R.pdirIn,R.pdirOut)+'</td><td data-l="">'+ver('dirpdir',R.pdirIn.n+R.pdirOut.n)+'</td></tr>'
-      +'</tbody></table></div><p class="nota">Los préstamos no cuentan para el 50%. «Por devolver» = entró más de lo que se devolvió en el período; «Devuelto» = en el período se devolvió (préstamos de meses anteriores). Las compras de dólares van en Cambio de moneda, no aquí.</p></div>';})();
-  // Otros egresos
-  var ds=distSeg(movs),sT=0,sU=0,sO=0;ds.forEach(function(d){sT+=d.gastado;sU+=d.gastadoU;sO+=d.ops;});
-  var segCard='<div class="card"><div class="card-head"><div><h2 class="card-title">Otros egresos</h2><div class="card-sub">Fuera del núcleo · no afectan el 100%</div></div></div>'
-    +'<table class="table cards"><tbody>'+ds.map(function(d){return '<tr><td class="full"><div class="areacell">'+areaDot(d.area)+esc(areaLabel(d.area))+'</div></td><td class="num" data-l="Soles">'+S(d.gastado)+'</td><td class="num usd" data-l="Dólares">'+(d.gastadoU?U(d.gastadoU):'—')+'</td><td class="num muted" data-l="Ops">'+d.ops+' ops</td></tr>';}).join('')
-    +'<tr class="total"><td>Subtotal</td><td class="num" data-l="Soles">'+S(sT)+'</td><td class="num usd" data-l="Dólares">'+(sU?U(sU):'—')+'</td><td class="num" data-l="Ops">'+sO+' ops</td></tr></tbody></table>'
-    +'</div>';
+  var resHtml=resultadosHtml(movs,f,dn,tc.toFixed(3));
   var persCard=READONLY?'':'<div class="card"><details class="more" id="persDetMov"'+(PERS_MOV_OPEN?' open':'')+'><summary>'+ico('users-three')+'Personal de la empresa<span class="sp"></span><span class="muted" style="font-weight:500;font-size:12.5px">'+DB.asesores.filter(function(a){return !a.fecha_fin||a.fecha_fin>=iso(new Date());}).length+' activos · todas las áreas</span><i class="ph ph-caret-down cr"></i></summary><div class="in">'
     +'<p class="nota" style="margin-top:0">Aquí se agrega, se cambia de área o se da de baja a cualquier persona (Ventas, Cobranza, Administración…). Lo que pongas aquí es lo que aparece al elegir <b>Personal</b> en un egreso, <b>Asesor</b> en una venta y <b>Encargado</b> en una cobranza.</p>'
     +renderAsesorMgmt('','todos')+'</div></details></div>';
-  box.innerHTML=hero+distCard+dirCard+segCard+egresosTipoHtml(movs)+'<div class="card" id="detCard"></div>'+persCard;
+  box.innerHTML=hero+resHtml+egresosTipoHtml(movs)+'<div class="card" id="detCard"></div>'+persCard;
   wireTipoSug(box,movs);
   Array.prototype.forEach.call(box.querySelectorAll('.dirVer'),function(b){b.onclick=function(){FILTER=b.dataset.f;SEARCH='';SEL=null;renderDetalle();var d=$('detCard');if(d)d.scrollIntoView({behavior:'smooth',block:'start'});};});
   var pdm=$('persDetMov');if(pdm){pdm.ontoggle=function(){PERS_MOV_OPEN=pdm.open;};wireAsesorMgmt('');}
@@ -2198,19 +2211,65 @@ function rankList(rows,colorFn,total){
 }
 
 // ============ CONSOLIDADO ============
+// Meses elegidos en Consolidado (vacío = todos). Se reinicia al cambiar de año.
+var CONSOL_MESES={},CONSOL_ANIO='';
+function consolMesOk(x){var k=Object.keys(CONSOL_MESES);return !k.length||!!CONSOL_MESES[+x.slice(5,7)];}
 function consolMovs(){
   var anio=$('selAnio').value,d1=$('cDesde').value,d2=$('cHasta').value;
-  return {anio:anio,d1:d1,d2:d2,movs:allMovs().filter(function(m){return m.fecha.slice(0,4)===anio&&(!d1||m.fecha>=d1)&&(!d2||m.fecha<=d2);})};
+  if(anio!==CONSOL_ANIO){CONSOL_ANIO=anio;CONSOL_MESES={};}
+  var enP=function(x){return x.slice(0,4)===anio&&(!d1||x>=d1)&&(!d2||x<=d2)&&consolMesOk(x);};
+  return {anio:anio,d1:d1,d2:d2,enP:enP,meses:Object.keys(CONSOL_MESES).map(Number).sort(function(a,b){return a-b;}),movs:allMovs().filter(function(m){return enP(m.fecha);})};
 }
-var CONSOLVIEW='general';
+// Chips de meses: solo se pueden elegir los meses del año que tienen movimientos
+function renderMesChips(){var anio=$('selAnio').value,box=$('cMeses');if(!box)return;if(anio!==CONSOL_ANIO){CONSOL_ANIO=anio;CONSOL_MESES={};}
+  var con={};allMovs().forEach(function(m){if(m.fecha.slice(0,4)===anio)con[+m.fecha.slice(5,7)]=1;});var todos=!Object.keys(CONSOL_MESES).length;
+  box.innerHTML='<button type="button" class="mchip'+(todos?' on':'')+'" data-m="0">Todo el año</button>'+[1,2,3,4,5,6,7,8,9,10,11,12].map(function(mn){var nom=MESES[mn-1];return '<button type="button" class="mchip'+(CONSOL_MESES[mn]?' on':'')+'" data-m="'+mn+'"'+(con[mn]?'':' disabled')+' title="'+nom.charAt(0)+nom.slice(1).toLowerCase()+'">'+nom.charAt(0)+nom.slice(1,3).toLowerCase()+'</button>';}).join('');
+  Array.prototype.forEach.call(box.querySelectorAll('.mchip'),function(b){b.onclick=function(){var mn=+b.dataset.m;if(!mn)CONSOL_MESES={};else if(CONSOL_MESES[mn])delete CONSOL_MESES[mn];else CONSOL_MESES[mn]=1;renderConsol();};});}
+function consolPeriodoTxt(q){var t=q.meses.length?q.meses.map(function(mn){var n=MESES[mn-1];return n.charAt(0)+n.slice(1,3).toLowerCase();}).join(', ')+' '+q.anio:'Año '+q.anio;
+  if(q.d1||q.d2)t+=' · '+(q.d1?'desde '+dmy(q.d1):'')+(q.d1&&q.d2?' ':'')+(q.d2?'hasta '+dmy(q.d2):'');return t;}
+var CONSOLVIEW='result';
 var NOTA_USD='dólares convertidos a S/ con el TC del mes';
 function renderConsol(){
-  $('pgTitle').textContent=tituloVista('consol');
+  $('pgTitle').textContent=tituloVista('consol');renderMesChips();
+  if(CONSOLVIEW==='result')return renderConsolResult();
   if(CONSOLVIEW==='ingresos')return renderConsolIngresos();
   if(CONSOLVIEW==='cac')return renderConsolCAC();
   return renderConsolGeneral();
 }
 function mesesPresentes(movs,fn){var m={};movs.forEach(function(x){if(!fn||fn(x))m[+x.fecha.slice(5,7)]=1;});return Object.keys(m).map(Number).sort(function(a,b){return a-b;});}
+// Resultados del período en Consolidado: lo mismo que Movimientos (distribución vs lo que entró, Cuenta Dirección, otros egresos,
+// tipos de egreso) pero para el año, un rango de fechas o los meses elegidos, más el detalle mes por mes.
+function renderConsolResult(){
+  var q=consolMovs(),movs=q.movs,box=$('consolBody');
+  if(!movs.length){box.innerHTML='<div class="card">'+emptyHtml('chart-bar','Sin datos para ese período','Elige otro año, otros meses o limpia las fechas.','dash')+'</div>';return;}
+  var fechas=movs.map(function(m){return m.fecha;}).sort(),f={rango:true,enP:q.enP,d:fechas[0],h:fechas[fechas.length-1],ym:''};
+  var dn=distIngreso(movs,f),cm=cambiosMoneda(q.enP),T=totales(movs);
+  var dg=dn.rows.filter(function(r){return r.area==='DEUDA GG';})[0]||{pct:0,recom:50},ar=dn.rows.filter(function(r){return r.area!=='DEUDA GG';}).reduce(function(a,r){return a+r.pct;},0);
+  var per=consolPeriodoTxt(q),stD=dg.pct>dg.recom+0.05,stA=ar>50.05;
+  var hero='<div class="kpis4">'+kpiCard('Entró de clientes',dn.base?S(dn.base):'—','Ventas + cobranza · '+esc(per),{vcls:'pos'})
+    +kpiCard('Capitalización',dn.base?dg.pct.toFixed(1)+'%':'—','Meta '+dg.recom+'% · de lo que entró',{cls:dn.base?(stD?'kpi-warn':'kpi-posbox'):''})
+    +kpiCard('Áreas',dn.base?ar.toFixed(1)+'%':'—','Meta 50% · de lo que entró',{cls:dn.base?(stA?'kpi-warn':'kpi-posbox'):''})
+    +kpiCard('Movimientos',movs.length,S(T.ingS)+' entró · '+S(T.egrS)+' salió'+(T.ingU||T.egrU?' (soles)':''))+'</div>';
+  var tcTxt=cm.tc?'TC pagado en las compras de dólares del período: '+cm.tc.toFixed(3):'TC del mes';
+  // Mes por mes: cada mes con su propio TC (igual que Movimientos)
+  var mesesP=mesesPresentes(movs);
+  function m2(s,u){return (s||!u?S(s):'')+(u?(s?'<br>':'')+'<span class="usd">'+U(u)+'</span>':'');}
+  function neto(a,b){var s=Math.round((a.s-b.s)*100)/100,u=Math.round((a.u-b.u)*100)/100;if(!s&&!u)return '<span class="muted3">—</span>';return m2(s,u);}
+  var filas=mesesP.map(function(mn){var y=q.anio+'-'+('0'+mn).slice(-2),enM=function(x){return x.slice(0,7)===y&&q.enP(x);},mv=movs.filter(function(m){return enM(m.fecha);});
+    var fM={rango:true,enP:enM,d:y+'-01',h:y+'-31',ym:y},d=distIngreso(mv,fM),R=dirTotales(mv,fM),g=d.rows.filter(function(r){return r.area==='DEUDA GG';})[0],a2=d.rows.filter(function(r){return r.area!=='DEUDA GG';}).reduce(function(a,r){return a+r.pct;},0);
+    return '<tr><td class="full"><b>'+mesLargo(y)+'</b></td><td class="num" data-l="Entró de clientes">'+(d.base?S(d.base):'—')+'</td><td class="num" data-l="Capitalización">'+m2(R.cap.s,R.cap.u)+'</td>'
+      +'<td class="num" data-l="% capitalización">'+(d.base?'<span class="pill '+(g.pct>g.recom+0.05?'ex':'ok')+'">'+g.pct.toFixed(1)+'%</span>':'—')+'</td><td class="num" data-l="% áreas">'+(d.base?'<span class="pill '+(a2>50.05?'ex':'ok')+'">'+a2.toFixed(1)+'%</span>':'—')+'</td>'
+      +'<td class="num" data-l="Préstamos capitalización">'+neto(R.pcapIn,R.pcapOut)+'</td><td class="num" data-l="Préstamo directo">'+neto(R.pdirIn,R.pdirOut)+'</td></tr>';}).join('');
+  var Rt=dirTotales(movs,f);
+  var porMes='<div class="card"><div class="card-head"><div><h2 class="card-title">Mes por mes</h2><div class="card-sub">'+esc(per)+' · cada mes con su TC, igual que en Movimientos · préstamos: positivo = falta devolver, negativo = se devolvió</div></div></div>'
+    +'<div class="tablewrap"><table class="table cards"><thead><tr><th>Mes</th><th class="num">Entró de clientes</th><th class="num">Capitalización</th><th class="num">% capitalización</th><th class="num">% áreas</th><th class="num">Préstamos capitalización</th><th class="num">Préstamo directo</th></tr></thead><tbody>'+filas
+    +'<tr class="total"><td class="full">TOTAL · '+esc(per)+'</td><td class="num" data-l="Entró de clientes">'+S(dn.base)+'</td><td class="num" data-l="Capitalización">'+m2(Rt.cap.s,Rt.cap.u)+'</td><td class="num" data-l="% capitalización">'+(dn.base?dg.pct.toFixed(1)+'%':'—')+'</td><td class="num" data-l="% áreas">'+(dn.base?ar.toFixed(1)+'%':'—')+'</td><td class="num" data-l="Préstamos capitalización">'+neto(Rt.pcapIn,Rt.pcapOut)+'</td><td class="num" data-l="Préstamo directo">'+neto(Rt.pdirIn,Rt.pdirOut)+'</td></tr>'
+    +'</tbody></table></div><p class="nota">El TOTAL pasa los dólares a soles con el TC pagado en las compras de dólares de todo el período; por eso su % puede diferir un poco del promedio de los meses.</p></div>';
+  box.innerHTML='<div class="sec-title">'+ico('chart-bar')+'Resultados · '+esc(per)+'</div>'+hero+resultadosHtml(movs,f,dn,tcTxt)+porMes+egresosTipoHtml(movs);
+  // "Ver" lleva a Movimientos con las mismas fechas y el filtro de ese ítem
+  Array.prototype.forEach.call(box.querySelectorAll('.dirVer'),function(b){b.title='Abre Movimientos del '+dmy(f.d)+' al '+dmy(f.h);b.onclick=function(){FILTER=b.dataset.f;SEARCH='';SEL=null;$('fDesde').value=f.d;$('fHasta').value=f.h;irA('mes');setTimeout(function(){var d=$('detCard');if(d)d.scrollIntoView({behavior:'smooth',block:'start'});},60);};});
+  Array.prototype.forEach.call(box.querySelectorAll('.tipoSugAplicar'),function(b){b.style.display='none';});
+}
 function renderConsolGeneral(){
   var q=consolMovs(),movs=q.movs,box=$('consolBody');
   if(!movs.length){box.innerHTML='<div class="card">'+emptyHtml('chart-bar','Sin datos para ese rango','Elige otro año o limpia las fechas.','dash')+'</div>';return;}
@@ -2263,7 +2322,7 @@ function renderConsolIngresos(){
 }
 function renderConsolCAC(){
   var q=consolMovs(),box=$('consolBody'),anio=q.anio,present=[];
-  for(var i=1;i<=12;i++){var y=anio+'-'+('0'+i).slice(-2);if(q.d1&&(y+'-31')<q.d1)continue;if(q.d2&&(y+'-01')>q.d2)continue;present.push(i);}
+  for(var i=1;i<=12;i++){var y=anio+'-'+('0'+i).slice(-2);if(q.d1&&(y+'-31')<q.d1)continue;if(q.d2&&(y+'-01')>q.d2)continue;if(q.meses.length&&q.meses.indexOf(i)<0)continue;present.push(i);}
   var byMonth={};present.forEach(function(mn){byMonth[mn]=calcularCAC(anio+'-'+('0'+mn).slice(-2));});
   present=present.filter(function(mn){return byMonth[mn].rows.length>0;});
   if(!present.length){box.innerHTML='<div class="card">'+emptyHtml('target','Sin datos de CAC / rentabilidad para ese rango','','dash')+'</div>';return;}
